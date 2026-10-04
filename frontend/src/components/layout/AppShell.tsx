@@ -11,36 +11,93 @@ export function AppShell() {
   if (!user) return null;
 
   const perms = new Set(user.permissions || []);
+  const roles = user.roles || [];
+  const isAdmin = user.is_admin || roles.includes("admin");
+  const isPlatformAdmin = user.is_platform_admin || roles.includes("platform_super_admin");
+  const isOwner = roles.includes("organization_owner");
+  const isIamAdmin = roles.includes("iam_admin");
+  const isDocManager = roles.includes("document_manager");
+  const isAuditor = roles.includes("security_auditor");
+  const isDeptManager = roles.includes("department_manager");
+  const isTeamLead = roles.includes("team_lead");
+  const isHr = roles.includes("hr");
+  const isFinance = roles.includes("finance");
+  const isEngineering = roles.includes("engineering");
+
   const links: [string, string][] = [];
 
-  if (perms.has("chat.use") || user.is_admin || !user.is_platform_admin) {
-    links.push(["ask", "Ask"]);
-  }
-  if (perms.has("document.metadata.read") || perms.has("document.upload") || user.is_admin) {
-    links.push(["documents", "Documents"]);
-  }
-  if (perms.has("user.read") || perms.has("role.manage") || perms.has("role.assign") || user.is_admin) {
-    links.push(["users-and-roles", "Users & Roles"]);
-  }
-  if (!user.is_platform_admin && (user.roles?.includes("department_manager") || user.roles?.includes("team_lead") || user.department_id || user.is_admin)) {
-    links.push(["department-insights", "Dept Insights"]);
-  }
-  if (!user.is_platform_admin) {
-    links.push(["access-requests", "Access Requests"]);
-  }
-  if (perms.has("policy.simulate") || user.is_admin) {
-    links.push(["simulator", "Simulator"]);
-  }
-  if (perms.has("audit.read") || perms.has("security_tests.read") || user.is_admin) {
-    links.push(["security", "Audit & Security"]);
-  }
-  if (perms.has("tenant.manage") || user.is_admin) {
-    links.push(["settings", "Org Settings"]);
-  }
-  if (user.is_platform_admin || perms.has("platform.tenant.manage")) {
+  if (isPlatformAdmin) {
     links.push(["platform", "Platform Ops"]);
+    links.push(["security", "Audit Oversight"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isOwner && !isAdmin) {
+    links.push(["settings", "Organization & Billing"]);
+    links.push(["users-and-roles", "Users & Governance"]);
+    links.push(["documents", "Documents Catalog"]);
+    links.push(["ask", "Ask (Executive)"]);
+    links.push(["access-requests", "Access Requests"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isAdmin) {
+    links.push(["ask", "Knowledge Search"]);
+    links.push(["documents", "Documents & Ingestion"]);
+    links.push(["users-and-roles", "IAM & Roles Builder"]);
+    links.push(["access-requests", "Access Approvals"]);
+    links.push(["simulator", "Policy Simulator"]);
+    links.push(["security", "Audit & Security Suite"]);
+    links.push(["department-insights", "Departments"]);
+    links.push(["settings", "Tenant Settings"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isIamAdmin) {
+    links.push(["users-and-roles", "Identity & Custom Roles"]);
+    links.push(["access-requests", "Access Approvals"]);
+    links.push(["department-insights", "Department Directory"]);
+    links.push(["ask", "Ask"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isDocManager) {
+    links.push(["documents", "Document Ingestion Hub"]);
+    links.push(["access-requests", "Access Approvals"]);
+    links.push(["ask", "Ask (Verification)"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isAuditor) {
+    links.push(["security", "Security & Audit Explorer"]);
+    links.push(["documents", "Document Metadata"]);
+    links.push(["access-requests", "Access Request Audit"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isDeptManager) {
+    links.push(["department-insights", "Department Dashboard"]);
+    links.push(["documents", "Department Docs"]);
+    links.push(["ask", "Ask"]);
+    links.push(["access-requests", "Team Access Requests"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isTeamLead) {
+    links.push(["department-insights", "Team Dashboard"]);
+    links.push(["ask", "Ask"]);
+    links.push(["documents", "Documents"]);
+    links.push(["access-requests", "Delegated Requests"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isHr) {
+    links.push(["users-and-roles", "Employee Lifecycle"]);
+    links.push(["documents", "HR Documents & Policies"]);
+    links.push(["ask", "Ask (Restricted L3)"]);
+    links.push(["access-requests", "Access Requests"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isFinance) {
+    links.push(["ask", "Financial Intelligence Q&A"]);
+    links.push(["documents", "Financial Documents"]);
+    links.push(["access-requests", "Access Requests"]);
+    links.push(["profile", "My Profile"]);
+  } else if (isEngineering) {
+    links.push(["ask", "Engineering & Architecture Q&A"]);
+    links.push(["documents", "Architecture Docs"]);
+    links.push(["access-requests", "Access Requests"]);
+    links.push(["profile", "My Profile"]);
+  } else {
+    // Standard employee
+    links.push(["ask", "Ask Company AI"]);
+    links.push(["documents", "Company Documents"]);
+    links.push(["access-requests", "Request Access"]);
+    links.push(["profile", "My Profile"]);
   }
-  links.push(["profile", "My Profile"]);
 
   return (
     <div className="flex h-screen flex-col md:flex-row">

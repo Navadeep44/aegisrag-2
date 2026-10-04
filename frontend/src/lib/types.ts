@@ -204,6 +204,7 @@ export type DepartmentInsights = {
   members_count: number;
   members: { id: string; name: string; email: string; roles: string[]; clearance: number; status: string }[];
   department_documents_count: number;
+  department_documents?: { id: string; title: string; classification_label: string; kind: string }[];
   total_queries_run: number;
   recent_activities: { id: number; actor: string; action: string; decision: string; time: string }[];
 };

@@ -111,29 +111,145 @@ export default function Documents() {
     }
   }
 
+  const isDocManager = user?.roles?.includes("document_manager") || user?.roles?.includes("admin") || user?.is_admin;
+  const isHr = user?.roles?.includes("hr");
+  const isAuditor = user?.roles?.includes("security_auditor");
+  const isDeptLead = user?.roles?.includes("department_manager") || user?.roles?.includes("team_lead");
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilterTab, setActiveFilterTab] = useState<string>("all");
+
+  const filteredDocs = (docs || []).filter((d) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      if (!d.title.toLowerCase().includes(q) && !d.filename.toLowerCase().includes(q)) return false;
+    }
+    if (activeFilterTab === "active") return d.status === "active";
+    if (activeFilterTab === "processing") return d.status === "processing";
+    if (activeFilterTab === "flagged") return d.flagged || d.status === "flagged";
+    if (activeFilterTab === "hr") return d.classification === 3 || d.title.toLowerCase().includes("leave") || d.title.toLowerCase().includes("salary");
+    if (activeFilterTab === "dept") return d.readable;
+    return true;
+  });
+
+  const activeCount = (docs || []).filter((d) => d.status === "active").length;
+  const processingCount = (docs || []).filter((d) => d.status === "processing").length;
+  const flaggedCount = (docs || []).filter((d) => d.flagged || d.status === "flagged").length;
+
   return (
-    <div className="max-w-4xl space-y-8 pb-12">
-      <PageHeader title="Documents Catalog">
-        {canManage
-          ? "Manage lifecycle, classification, pre-indexing grants, and processing jobs. Access changes apply to subsequent queries immediately."
-          : "These are the authorized documents your questions can draw upon according to your role grants and clearance."}
-      </PageHeader>
+    <div className="max-w-5xl space-y-8 pb-12">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <PageHeader title={isDocManager ? "Document Ingestion & Knowledge Hub" : isAuditor ? "Document Catalog Metadata (Audit View)" : "Documents Catalog"}>
+          {isDocManager
+            ? "Manage lifecycle, classification tiers, pre-indexing grants, and multimodal ingestion pipeline jobs. Access changes apply to subsequent queries immediately."
+            : isAuditor
+            ? "Inspect tamper-proof checksums, document classifications, multimodal extraction formats, and indirect prompt injection flags."
+            : "Authorized enterprise documents your questions can draw upon according to your role grants and clearance level."}
+        </PageHeader>
+        {!canManage && (
+          <a href="/app/access-requests" className="text-xs text-accent underline underline-offset-4 hover:opacity-80 font-medium">
+            Request Additional Document Access →
+          </a>
+        )}
+      </div>
+
+      {/* Operations metrics banner for Document Managers & Admins */}
+      {isDocManager && docs && (
+        <section className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+          <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
+            <p className="text-xs uppercase tracking-wide text-muted">Total Ingested</p>
+            <p className="display mt-1 text-3xl font-semibold text-ink">{docs.length}</p>
+          </div>
+          <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
+            <p className="text-xs uppercase tracking-wide text-muted">Active in Vector DB</p>
+            <p className="display mt-1 text-3xl font-semibold text-emerald-700">{activeCount}</p>
+          </div>
+          <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
+            <p className="text-xs uppercase tracking-wide text-muted">Processing Queue</p>
+            <p className="display mt-1 text-3xl font-semibold text-sky-700">{processingCount}</p>
+          </div>
+          <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
+            <p className="text-xs uppercase tracking-wide text-muted">Flagged Injections</p>
+            <p className="display mt-1 text-3xl font-semibold text-amber-700">{flaggedCount}</p>
+          </div>
+        </section>
+      )}
 
       {error && <Notice tone="error">{error}</Notice>}
       {notice && <Notice tone="info">{notice}</Notice>}
 
       {canUpload && <UploadForm roles={roles} departments={departments} onDone={load} />}
 
+      {/* Filter and Search Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
+        <div className="flex flex-wrap gap-1 text-xs">
+          <button
+            onClick={() => setActiveFilterTab("all")}
+            className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "all" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
+          >
+            All ({docs?.length ?? 0})
+          </button>
+          {isDocManager && (
+            <>
+              <button
+                onClick={() => setActiveFilterTab("active")}
+                className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "active" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
+              >
+                Active ({activeCount})
+              </button>
+              <button
+                onClick={() => setActiveFilterTab("processing")}
+                className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "processing" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
+              >
+                Processing ({processingCount})
+              </button>
+              <button
+                onClick={() => setActiveFilterTab("flagged")}
+                className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "flagged" ? "bg-amber-700 font-medium text-white" : "border border-line bg-surface text-muted hover:text-amber-700"}`}
+              >
+                Flagged Injections ({flaggedCount})
+              </button>
+            </>
+          )}
+          {isHr && (
+            <button
+              onClick={() => setActiveFilterTab("hr")}
+              className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "hr" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
+            >
+              HR & Policies
+            </button>
+          )}
+          {isDeptLead && (
+            <button
+              onClick={() => setActiveFilterTab("dept")}
+              className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "dept" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
+            >
+              My Department
+            </button>
+          )}
+        </div>
+
+        <div className="w-full sm:w-64">
+          <input
+            type="text"
+            placeholder="Filter documents by title…"
+            className="w-full rounded-md border border-line bg-surface px-3 py-1 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+      </div>
+
       {docs === null ? (
         <p className="text-sm text-muted">Loading catalog…</p>
-      ) : docs.length === 0 ? (
+      ) : filteredDocs.length === 0 ? (
         <Notice tone="info">
-          {canManage ? "No documents in organization. Upload a document above." : "No documents have been authorized for your profile."}
+          {searchQuery ? "No documents match your search query." : canManage ? "No documents match the selected filter." : "No documents have been authorized for your profile."}
         </Notice>
       ) : (
         <ul className="space-y-4">
           <AnimatePresence initial={false}>
-            {docs.map((doc) => (
+            {filteredDocs.map((doc) => (
               <motion.li
                 key={doc.id}
                 layout

@@ -22,13 +22,13 @@ export default function SignIn() {
     api<DemoUser[]>("/auth/demo-users").then(setDemoUsers).catch((e) => setError(e.message));
   }, []);
 
-  if (ready && user) return <Navigate to="/app/ask" replace />;
+  if (ready && user) return <Navigate to="/app" replace />;
 
   async function finish(request: Promise<Session>) {
     setError("");
     try {
       signIn(await request);
-      navigate("/app/ask");
+      navigate("/app");
     } catch (e) {
       setError((e as Error).message);
     }

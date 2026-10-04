@@ -10,7 +10,8 @@ import { hasPermission } from "../lib/types";
 
 export default function UsersAndRoles() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"users" | "roles" | "departments" | "hr">("users");
+  const isHrOnly = user?.roles?.includes("hr") && !user?.roles?.includes("admin") && !user?.roles?.includes("iam_admin") && !user?.is_admin;
+  const [activeTab, setActiveTab] = useState<"users" | "roles" | "departments" | "hr">(isHrOnly ? "hr" : "users");
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -69,7 +70,8 @@ export default function UsersAndRoles() {
 
   useEffect(() => {
     loadData();
-  }, []);
+    if (isHrOnly) setActiveTab("hr");
+  }, [user]);
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();

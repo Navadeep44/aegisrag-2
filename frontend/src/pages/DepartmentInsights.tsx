@@ -141,6 +141,57 @@ export default function DepartmentInsights() {
             </div>
           </section>
 
+          {/* Department Documents Table */}
+          <section className="rounded-xl border border-line bg-surface p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="display text-2xl">Department Knowledge Base ({insights.department_documents?.length || 0})</h2>
+                <p className="mt-1 text-xs text-muted">
+                  Documents explicitly granted to this department unit for pre-retrieval SQL search.
+                </p>
+              </div>
+              <Link to="/app/documents">
+                <Button kind="secondary">View in Catalog</Button>
+              </Link>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-line bg-line/20 text-xs text-muted">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Document Title</th>
+                    <th className="px-4 py-3 font-medium">Format</th>
+                    <th className="px-4 py-3 font-medium">Classification</th>
+                    <th className="px-4 py-3 font-medium text-right">Access Scope</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {(insights.department_documents || []).map((doc) => (
+                    <tr key={doc.id} className="hover:bg-white/50">
+                      <td className="px-4 py-3 font-medium text-ink">{doc.title}</td>
+                      <td className="px-4 py-3 text-xs uppercase font-mono text-muted">{doc.kind}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded bg-line px-2 py-0.5 text-xs font-semibold text-ink">
+                          {doc.classification_label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs text-emerald-700 font-medium">
+                        Granted to {insights.department_name}
+                      </td>
+                    </tr>
+                  ))}
+                  {(!insights.department_documents || insights.department_documents.length === 0) && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-6 text-center text-xs text-muted">
+                        No documents currently have explicit boundary grants to this department. Team members access broad company documents.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           {/* Department Activity Log */}
           <section className="rounded-xl border border-line bg-surface p-6 shadow-sm">
             <h2 className="display text-2xl">Recent Department Activity</h2>

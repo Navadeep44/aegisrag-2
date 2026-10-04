@@ -1478,6 +1478,20 @@ def get_department_insights(
             for e in events
         ]
 
+    dept_doc_ids = set(dept_grants)
+    dept_docs = []
+    if dept_doc_ids:
+        docs = db.execute(select(Document).where(Document.id.in_(dept_doc_ids))).scalars().all()
+        dept_docs = [
+            {
+                "id": d.id,
+                "title": d.title,
+                "classification_label": LEVELS[d.classification] if 0 <= d.classification < len(LEVELS) else "Unknown",
+                "kind": d.kind,
+            }
+            for d in docs
+        ]
+
     return {
         "department_id": dept_id_val,
         "department_name": dept_name,
@@ -1493,7 +1507,8 @@ def get_department_insights(
             }
             for u in dept_users
         ],
-        "department_documents_count": len(set(dept_grants)),
+        "department_documents_count": len(dept_doc_ids),
+        "department_documents": dept_docs,
         "total_queries_run": query_count,
         "recent_activities": recent_activities,
     }
