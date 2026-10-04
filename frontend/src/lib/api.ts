@@ -42,6 +42,26 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const post = <T,>(path: string, body: unknown) =>
   api<T>(path, { method: "POST", body: JSON.stringify(body) });
 
+export const patch = <T,>(path: string, body: unknown) =>
+  api<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+
+export const del = <T,>(path: string) =>
+  api<T>(path, { method: "DELETE" });
+
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const response = await fetch("/api" + path, { headers: headers() });
+  if (!response.ok) throw new Error("Download failed.");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /** Page images need the auth header, so they are fetched and shown as object URLs. */
 export async function imageUrl(path: string): Promise<string | null> {
   try {

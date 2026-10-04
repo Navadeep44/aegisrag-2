@@ -16,6 +16,7 @@ export default function SignIn() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [demoUsers, setDemoUsers] = useState<DemoUser[]>([]);
+  const [filterRole, setFilterRole] = useState("all");
 
   useEffect(() => {
     api<DemoUser[]>("/auth/demo-users").then(setDemoUsers).catch((e) => setError(e.message));
@@ -33,13 +34,32 @@ export default function SignIn() {
     }
   }
 
+  const roleCategories = [
+    { id: "all", label: "All Personas" },
+    { id: "admin", label: "Admin & IAM" },
+    { id: "operations", label: "Docs & Audit" },
+    { id: "teams", label: "Dept & Teams" },
+    { id: "specialists", label: "Specialists" },
+    { id: "platform", label: "Super Admin" },
+  ];
+
+  const filteredUsers = demoUsers.filter((u) => {
+    if (filterRole === "all") return true;
+    if (filterRole === "platform") return u.roles.includes("platform_super_admin");
+    if (filterRole === "admin") return u.roles.some((r) => ["admin", "organization_owner", "iam_admin"].includes(r));
+    if (filterRole === "operations") return u.roles.some((r) => ["document_manager", "security_auditor"].includes(r));
+    if (filterRole === "teams") return u.roles.some((r) => ["department_manager", "team_lead"].includes(r));
+    if (filterRole === "specialists") return u.roles.some((r) => ["hr", "finance", "engineering"].includes(r));
+    return true;
+  });
+
   return (
-    <main className="mx-auto grid min-h-screen max-w-5xl items-center gap-14 px-6 py-12 md:grid-cols-2">
-      <section>
-        <Link to="/" className="display text-2xl">AegisRAG</Link>
+    <main className="mx-auto grid min-h-screen max-w-6xl items-start gap-12 px-6 py-12 lg:grid-cols-[1fr_1.4fr]">
+      <section className="sticky top-12">
+        <Link to="/" className="display text-2xl tracking-tight">AegisRAG</Link>
         <h1 className="display mt-10 text-5xl">Sign in</h1>
         <p className="mt-3 max-w-sm leading-relaxed text-muted">
-          What you can ask about depends on who you are. Pick a demo account, or use your email and password.
+          Access is derived from verified server-side identity, roles, and clearance. Experience any of the 11 specification roles below or sign in manually.
         </p>
         <form className="mt-8 max-w-sm space-y-4" onSubmit={(e) => { e.preventDefault(); finish(post<Session>("/auth/login", { email, password })); }}>
           <label className="block text-sm font-medium">Email
@@ -54,21 +74,54 @@ export default function SignIn() {
       </section>
 
       {demoUsers.length > 0 && (
-        <section aria-label="Demo accounts">
-          <h2 className="display text-3xl">Demo accounts</h2>
-          <p className="mt-2 text-sm text-muted">One click signs you in. Available in demo mode only.</p>
-          <ul className="mt-6 divide-y divide-line border-y border-line">
-            {demoUsers.map((u, i) => (
-              <motion.li key={u.email}
-                initial={reduce ? false : { opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.05 * i, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
-                <button onClick={() => finish(post<Session>("/auth/demo-login", { email: u.email }))}
-                  className="group flex w-full items-baseline justify-between gap-4 px-1 py-3.5 text-left transition-colors hover:bg-surface">
-                  <span>
-                    <span className="font-medium group-hover:text-accent">{u.name}</span>
-                    <span className="block text-sm text-muted">{u.tenant}</span>
-                  </span>
-                  <span className="text-sm text-muted">{u.roles.join(", ")}</span>
+        <section aria-label="Demo accounts" className="rounded-xl border border-line bg-surface p-6 shadow-sm">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-4">
+            <div>
+              <h2 className="display text-3xl">Demo Personas (11 Roles)</h2>
+              <p className="mt-1 text-sm text-muted">Instant one-click authentication for any role in the spec.</p>
+            </div>
+            <span className="rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent">Demo Mode</span>
+          </div>
+
+          <div className="my-4 flex flex-wrap gap-1.5">
+            {roleCategories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setFilterRole(c.id)}
+                className={`rounded-full px-3 py-1 text-xs transition-colors ${filterRole === c.id ? "bg-ink font-medium text-white" : "border border-line bg-white/70 hover:border-ink"}`}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+
+          <ul className="divide-y divide-line">
+            {filteredUsers.map((u, i) => (
+              <motion.li
+                key={u.email}
+                initial={reduce ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.03 * i, duration: 0.3 }}
+              >
+                <button
+                  onClick={() => finish(post<Session>("/auth/demo-login", { email: u.email }))}
+                  className="group flex w-full items-center justify-between gap-4 py-3.5 text-left transition-colors hover:bg-white/90 rounded-md px-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-ink group-hover:text-accent">{u.name}</span>
+                      <span className="rounded bg-line/80 px-1.5 py-0.5 text-[0.7rem] uppercase tracking-wide text-muted">
+                        {u.tenant}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted truncate">
+                      {u.email} • Dept: {u.department || "General"}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="block text-xs font-medium text-ink">{u.roles.join(", ")}</span>
+                    <span className="text-[0.7rem] text-muted">Clearance: {u.clearance_label || "Internal"}</span>
+                  </div>
                 </button>
               </motion.li>
             ))}

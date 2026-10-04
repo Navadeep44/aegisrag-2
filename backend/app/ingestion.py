@@ -1,3 +1,4 @@
+import hashlib
 import io
 import re
 import shutil
@@ -5,11 +6,12 @@ from pathlib import Path
 
 import openpyxl
 import pymupdf
+from sqlalchemy import select
 
 from app import ai, audit
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Chunk, Document
+from app.models import Chunk, Document, IngestionJob, now
 
 MAGIC = {
     ".pdf": ("pdf", b"%PDF"),
@@ -32,6 +34,10 @@ INJECTION_PATTERNS = [
 ]
 _INJECTION = re.compile("|".join(INJECTION_PATTERNS), re.IGNORECASE)
 REMOVED = "[instruction-like text removed]"
+
+
+def compute_checksum(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def validate_upload(filename: str, data: bytes) -> str:
@@ -155,6 +161,30 @@ def _extract_xlsx(path: Path) -> tuple[list[tuple[int, str, str]], int]:
     return sections, 0
 
 
+def create_or_update_job(
+    db, doc: Document, status: str, stage: str, error_code: str | None = None
+) -> IngestionJob:
+    job = db.execute(
+        select(IngestionJob).where(IngestionJob.document_id == doc.id)
+    ).scalars().first()
+    if not job:
+        job = IngestionJob(
+            tenant_id=doc.tenant_id,
+            document_id=doc.id,
+            status=status,
+            stage=stage,
+            error_code=error_code,
+        )
+        db.add(job)
+    else:
+        job.status = status
+        job.stage = stage
+        job.error_code = error_code
+        job.updated_at = now()
+    db.commit()
+    return job
+
+
 def process_document(document_id: str) -> None:
     """Extract, sanitize, chunk and embed one document. Runs as a background task."""
     db = SessionLocal()
@@ -162,8 +192,10 @@ def process_document(document_id: str) -> None:
         doc = db.get(Document, document_id)
         if not doc:
             return
+        create_or_update_job(db, doc, status="processing", stage="validation")
         path = doc_dir(doc) / ("original" + Path(doc.filename).suffix.lower())
         try:
+            create_or_update_job(db, doc, status="processing", stage="extraction")
             if doc.kind == "pdf":
                 sections, unread = _extract_pdf(doc, path)
             elif doc.kind == "image":
@@ -173,6 +205,7 @@ def process_document(document_id: str) -> None:
             else:
                 sections, unread = [(1, "text", path.read_text("utf-8"))], 0
 
+            create_or_update_job(db, doc, status="processing", stage="sanitization")
             pieces, removed = [], 0
             for page, location, text in sections:
                 limit = 4000 if doc.kind == "xlsx" else 900
@@ -181,27 +214,63 @@ def process_document(document_id: str) -> None:
                     removed += count
                     pieces.append((page, location, clean))
 
+            create_or_update_job(db, doc, status="processing", stage="embedding")
             vectors = ai.embed([p[2] for p in pieces]) if pieces else []
             for (page, location, text), vector in zip(pieces, vectors):
-                db.add(Chunk(tenant_id=doc.tenant_id, document_id=doc.id, page=page,
-                             location=location, text=text, embedding=vector))
+                db.add(
+                    Chunk(
+                        tenant_id=doc.tenant_id,
+                        document_id=doc.id,
+                        page=page,
+                        location=location,
+                        text=text,
+                        embedding=vector,
+                    )
+                )
             doc.page_count = max([s[0] for s in sections], default=0) + 0
             doc.flagged = removed > 0
             notes = []
             if unread:
-                notes.append(f"{unread} page(s) had no readable text. Configure a vision model to read scans and images.")
+                notes.append(
+                    f"{unread} page(s) had no readable text. Configure a vision model to read scans and images."
+                )
             if removed:
                 notes.append(f"{removed} instruction-like passage(s) removed.")
             doc.note = " ".join(notes)
             doc.status = "active"
             db.commit()
+            create_or_update_job(db, doc, status="ready", stage="complete")
             if removed:
-                audit.log(db, doc.tenant_id, doc.owner_id, "ingest.injection_flag", "flagged",
-                          document_id=doc.id, passages_removed=removed)
+                audit.log(
+                    db,
+                    doc.tenant_id,
+                    doc.owner_id,
+                    "ingest.injection_flag",
+                    "flagged",
+                    document_id=doc.id,
+                    passages_removed=removed,
+                )
         except Exception as error:  # a broken file must not take the worker down
             db.rollback()
             doc.status = "failed"
             doc.note = f"Processing failed: {str(error)[:200]}"
             db.commit()
+            create_or_update_job(db, doc, status="failed", stage="failed", error_code=str(error)[:200])
     finally:
         db.close()
+
+
+def reprocess_document(document_id: str) -> None:
+    """Removes existing chunks and re-runs processing."""
+    db = SessionLocal()
+    try:
+        doc = db.get(Document, document_id)
+        if not doc:
+            return
+        db.query(Chunk).filter(Chunk.document_id == doc.id).delete()
+        doc.status = "processing"
+        doc.version = (doc.version or 1) + 1
+        db.commit()
+    finally:
+        db.close()
+    process_document(document_id)

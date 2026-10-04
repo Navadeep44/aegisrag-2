@@ -1,9 +1,15 @@
 import { smallSelectClass } from "../../components/ui/field";
-import { LEVELS, type Doc, type Grant, type Role, type User } from "../../lib/types";
+import { LEVELS, type Department, type Doc, type Grant, type Role, type User } from "../../lib/types";
 
-type Props = { doc: Doc; roles: Role[]; users: User[]; onSave: (doc: Doc, grants: Grant[], classification?: number) => void };
+type Props = {
+  doc: Doc;
+  roles: Role[];
+  users: User[];
+  departments?: Department[];
+  onSave: (doc: Doc, grants: Grant[], classification?: number) => void;
+};
 
-export function AccessEditor({ doc, roles, users, onSave }: Props) {
+export function AccessEditor({ doc, roles, users, departments = [], onSave }: Props) {
   const grants = doc.access ?? [];
   const has = (type: string, id: string | null) => grants.some((g) => g.subject_type === type && g.subject_id === id);
   const toggle = (type: Grant["subject_type"], id: string | null) =>
@@ -24,6 +30,16 @@ export function AccessEditor({ doc, roles, users, onSave }: Props) {
           <button key={r.id} className={chip(has("role", r.id))} aria-pressed={has("role", r.id)} onClick={() => toggle("role", r.id)}>{r.name}</button>
         ))}
       </div>
+      {departments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-28 text-muted">Departments</span>
+          {departments.map((d) => (
+            <button key={d.id} className={chip(has("department", d.id))} aria-pressed={has("department", d.id)} onClick={() => toggle("department", d.id)}>
+              {d.name}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <span className="w-28 text-muted">Individuals</span>
         {individuals.map((g) => (
@@ -43,7 +59,7 @@ export function AccessEditor({ doc, roles, users, onSave }: Props) {
           value={doc.classification} onChange={(e) => onSave(doc, grants, Number(e.target.value))}>
           {LEVELS.map((label, i) => <option key={label} value={i}>{label}</option>)}
         </select>
-        <span className="text-xs text-muted">Role grants need matching clearance. An individual grant is a named exception.</span>
+        <span className="text-xs text-muted">Role and department grants need matching clearance. An individual grant is a named exception.</span>
       </div>
     </div>
   );

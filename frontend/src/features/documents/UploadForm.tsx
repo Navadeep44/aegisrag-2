@@ -3,13 +3,13 @@ import { Button } from "../../components/ui/Button";
 import { inputClass } from "../../components/ui/field";
 import { Notice } from "../../components/ui/Notice";
 import { api } from "../../lib/api";
-import { LEVELS, type Role } from "../../lib/types";
+import { LEVELS, type Department, type Role } from "../../lib/types";
 
-export function UploadForm({ roles, onDone }: { roles: Role[]; onDone: () => void }) {
+export function UploadForm({ roles, departments = [], onDone }: { roles: Role[]; departments?: Department[]; onDone: () => void }) {
   const file = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [classification, setClassification] = useState(1);
-  const [roleId, setRoleId] = useState("");
+  const [initialGrant, setInitialGrant] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -17,7 +17,16 @@ export function UploadForm({ roles, onDone }: { roles: Role[]; onDone: () => voi
     e.preventDefault();
     const chosen = file.current?.files?.[0];
     if (!chosen) { setError("Choose a file to upload."); return; }
-    const grants = roleId === "*" ? [{ subject_type: "everyone" }] : roleId ? [{ subject_type: "role", subject_id: roleId }] : [];
+
+    let grants: unknown[] = [];
+    if (initialGrant === "*") {
+      grants = [{ subject_type: "everyone" }];
+    } else if (initialGrant.startsWith("role:")) {
+      grants = [{ subject_type: "role", subject_id: initialGrant.replace("role:", "") }];
+    } else if (initialGrant.startsWith("department:")) {
+      grants = [{ subject_type: "department", subject_id: initialGrant.replace("department:", "") }];
+    }
+
     const form = new FormData();
     form.append("file", chosen);
     form.append("title", title);
@@ -46,10 +55,17 @@ export function UploadForm({ roles, onDone }: { roles: Role[]; onDone: () => voi
         <select className={inputClass} aria-label="Classification" value={classification} onChange={(e) => setClassification(Number(e.target.value))}>
           {LEVELS.map((label, i) => <option key={label} value={i}>{label}</option>)}
         </select>
-        <select className={inputClass} aria-label="Initial access" value={roleId} onChange={(e) => setRoleId(e.target.value)}>
+        <select className={inputClass} aria-label="Initial access" value={initialGrant} onChange={(e) => setInitialGrant(e.target.value)}>
           <option value="">No access yet</option>
           <option value="*">Everyone</option>
-          {roles.map((r) => <option key={r.id} value={r.id}>Role: {r.name}</option>)}
+          <optgroup label="Roles">
+            {roles.map((r) => <option key={r.id} value={`role:${r.id}`}>Role: {r.name}</option>)}
+          </optgroup>
+          {departments.length > 0 && (
+            <optgroup label="Departments">
+              {departments.map((d) => <option key={d.id} value={`department:${d.id}`}>Dept: {d.name}</option>)}
+            </optgroup>
+          )}
         </select>
       </div>
       {error && <div className="mt-3"><Notice tone="error">{error}</Notice></div>}

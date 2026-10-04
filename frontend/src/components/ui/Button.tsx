@@ -1,12 +1,13 @@
 import type { ButtonHTMLAttributes } from "react";
 import { Link, type LinkProps } from "react-router-dom";
 
-type Kind = "primary" | "quiet" | "danger";
+type Kind = "primary" | "quiet" | "danger" | "secondary";
 type Size = "md" | "lg";
 
 const kinds: Record<Kind, string> = {
   primary: "bg-ink text-white hover:bg-accent",
   quiet: "bg-surface text-ink border border-line hover:border-ink",
+  secondary: "bg-surface text-ink border border-line hover:border-ink",
   danger: "bg-surface text-deny border border-line hover:border-deny",
 };
 const sizes: Record<Size, string> = {

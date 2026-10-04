@@ -42,12 +42,36 @@ def current_user(
     except jwt.PyJWTError:
         raise HTTPException(401, "Session is invalid or expired. Sign in again.")
     user = db.get(User, payload.get("sub"))
-    if not user or not user.active:
+    if not user or not user.active or user.status == "deactivated":
         raise HTTPException(401, "Account is not active.")
+    if user.tenant and user.tenant.status == "suspended" and not user.is_platform_admin:
+        raise HTTPException(403, "Tenant is suspended. Contact platform administrator.")
     return user
 
 
 def require_admin(user: User = Depends(current_user)) -> User:
-    if not user.is_admin:
+    if not (user.is_admin or user.has_permission("tenant.manage") or user.has_permission("role.manage")):
         raise HTTPException(403, "Only administrators can do this.")
     return user
+
+
+def require_platform_admin(user: User = Depends(current_user)) -> User:
+    if not user.is_platform_admin:
+        raise HTTPException(403, "Only platform super administrators can do this.")
+    return user
+
+
+def require_permission(perm: str):
+    def dependency(user: User = Depends(current_user)) -> User:
+        if not user.has_permission(perm):
+            raise HTTPException(403, f"Missing required permission: {perm}")
+        return user
+    return dependency
+
+
+def require_any_permission(*perms: str):
+    def dependency(user: User = Depends(current_user)) -> User:
+        if not any(user.has_permission(p) for p in perms):
+            raise HTTPException(403, f"Action requires one of: {', '.join(perms)}")
+        return user
+    return dependency

@@ -6,27 +6,46 @@ belongs to the user's tenant, and either:
   * it is granted to everyone or to one of the user's roles, AND the user's
     clearance is at least the document's classification.
 
+Admin, owner, platform admin, auditor, and uploader do not gain content
+access implicitly.
 Every query that touches documents or chunks must go through readable_clause().
 """
+from datetime import datetime, timezone
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import LEVELS, Document, DocumentAccess, User
+from app.models import LEVELS, Document, DocumentAccess, User, now
 
 
 def readable_clause(user: User):
+    current_time = now()
     role_ids = [r.id for r in user.roles]
+
+    unexpired = or_(
+        DocumentAccess.expires_at.is_(None),
+        DocumentAccess.expires_at > current_time
+    )
+
     individual = exists().where(
         DocumentAccess.document_id == Document.id,
         DocumentAccess.subject_type == "user",
         DocumentAccess.subject_id == user.id,
+        unexpired,
     )
     broad_subjects = [DocumentAccess.subject_type == "everyone"]
     if role_ids:
         broad_subjects.append(
             and_(DocumentAccess.subject_type == "role", DocumentAccess.subject_id.in_(role_ids))
         )
-    broad = exists().where(DocumentAccess.document_id == Document.id, or_(*broad_subjects))
+    if user.department_id:
+        broad_subjects.append(
+            and_(DocumentAccess.subject_type == "department", DocumentAccess.subject_id == user.department_id)
+        )
+    broad = exists().where(
+        DocumentAccess.document_id == Document.id,
+        or_(*broad_subjects),
+        unexpired,
+    )
     return and_(
         Document.tenant_id == user.tenant_id,
         Document.status == "active",
@@ -50,17 +69,29 @@ def explain(user: User, doc: Document, role_names: dict[str, str]) -> tuple[bool
         return False, "Belongs to another organization"
     if doc.status != "active":
         return False, f"Document is {doc.status}"
+    
+    current_time = now()
     user_role_ids = {r.id for r in user.roles}
+    
     for g in doc.access:
+        if g.expires_at and g.expires_at <= current_time:
+            continue
         if g.subject_type == "user" and g.subject_id == user.id:
             return True, "Individual grant"
+            
     matched = None
     for g in doc.access:
+        if g.expires_at and g.expires_at <= current_time:
+            continue
         if g.subject_type == "everyone":
             matched = "Granted to everyone"
         elif g.subject_type == "role" and g.subject_id in user_role_ids:
             matched = f"Granted to role {role_names.get(g.subject_id, '?')}"
             break
+        elif g.subject_type == "department" and user.department_id and g.subject_id == user.department_id:
+            matched = f"Granted to department {user.department_id}"
+            break
+            
     if not matched:
         return False, "No grant for this user or their roles"
     if doc.classification > user.clearance:

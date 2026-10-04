@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { Notice } from "../components/ui/Notice";
 import { PageHeader } from "../components/ui/PageHeader";
-import { api } from "../lib/api";
+import { api, downloadFile } from "../lib/api";
 import type { AuditEvent, TestReport } from "../lib/types";
 
 const ACTIONS: Record<string, string> = {
@@ -12,12 +12,34 @@ const ACTIONS: Record<string, string> = {
   "document.upload": "Uploaded a document",
   "document.delete": "Deleted a document",
   "document.access_change": "Changed document access",
+  "document.reprocess": "Reprocessed document",
   "ingest.injection_flag": "Suspicious instructions found in an upload",
   "policy.simulate": "Ran the permission simulator",
+  "access_request.create": "Submitted access request",
+  "access_request.decide": "Decided access request",
+  "user.invite": "Invited tenant user",
+  "user.status_change": "Updated user status",
+  "role.assign": "Assigned user roles",
+  "role.manage": "Created custom role",
+  "auth.login": "Signed in",
+  "auth.logout": "Signed out",
+  "audit.export": "Exported audit report",
 };
-const FILTERS = [["", "All"], ["abstained", "No authorized source"], ["denied", "Denied"], ["flagged", "Flagged"]];
+
+const FILTERS = [
+  ["", "All"],
+  ["abstained", "No authorized source"],
+  ["denied", "Denied"],
+  ["flagged", "Flagged"],
+  ["allowed", "Allowed"],
+];
+
 const tone = (decision: string) =>
-  ["denied", "flagged", "failed"].includes(decision) ? "text-deny" : decision === "abstained" ? "text-warn" : "text-allow";
+  ["denied", "flagged", "failed"].includes(decision)
+    ? "text-deny"
+    : decision === "abstained"
+    ? "text-warn"
+    : "text-allow";
 
 export default function Security() {
   const [report, setReport] = useState<TestReport | null>(null);
@@ -25,31 +47,62 @@ export default function Security() {
   const [filter, setFilter] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
 
-  useEffect(() => { api<TestReport>("/security/tests").then(setReport).catch((e) => setError(e.message)); }, []);
   useEffect(() => {
-    api<AuditEvent[]>(`/audit/events${filter ? `?decision=${filter}` : ""}`).then(setEvents).catch((e) => setError(e.message));
+    api<TestReport>("/security/tests")
+      .then(setReport)
+      .catch((e) => setError(e.message));
+  }, []);
+
+  useEffect(() => {
+    api<AuditEvent[]>(`/audit/events${filter ? `?decision=${filter}` : ""}`)
+      .then(setEvents)
+      .catch((e) => setError(e.message));
   }, [filter]);
 
   async function run() {
-    setRunning(true); setError("");
-    try { setReport(await api<TestReport>("/security/tests/run", { method: "POST" })); }
-    catch (e) { setError((e as Error).message); }
-    finally { setRunning(false); }
+    setRunning(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await api<TestReport>("/security/tests/run", { method: "POST" });
+      setReport(res);
+      setNotice("Security test suite executed successfully against test database.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function exportAudit(format: "csv" | "json") {
+    try {
+      await downloadFile(`/audit/export?format=${format}`, `audit-events.${format}`);
+      setNotice(`Audit report downloaded as ${format.toUpperCase()}.`);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   const security = report?.tests.filter((t) => t.group === "security") ?? [];
   const other = report?.tests.filter((t) => t.group !== "security") ?? [];
 
   return (
-    <div className="max-w-4xl space-y-14 pb-10">
+    <div className="max-w-5xl space-y-14 pb-12">
       <section>
-        <PageHeader title="Security">
-          Attack and access tests run against a separate test database with its own copy of the demo data. Results below are from the last real run.
+        <PageHeader title="Security & Audit Explorer">
+          Attack and access regression tests run against a separate isolated database. Audit events record actor, decision, and correlation ID without storing sensitive document text.
         </PageHeader>
+
         {error && <div className="mb-4"><Notice tone="error">{error}</Notice></div>}
+        {notice && <div className="mb-4"><Notice tone="info">{notice}</Notice></div>}
+
         <div className="mb-4 flex flex-wrap items-center gap-4">
-          <Button onClick={run} disabled={running}>{running ? "Running tests…" : "Run tests"}</Button>
+          <Button onClick={run} disabled={running}>
+            {running ? "Running security test suite…" : "Run 17 Security Tests"}
+          </Button>
           {report?.ran_at && (
             <p className="text-sm text-muted">
               Last run {new Date(report.ran_at).toLocaleString()}: <span className="text-allow">{report.passed} passed</span>
@@ -57,47 +110,103 @@ export default function Security() {
             </p>
           )}
         </div>
-        {!report?.ran_at ? <Notice tone="info">No test run yet. Run the tests to see results.</Notice> : (
+
+        {!report?.ran_at ? (
+          <Notice tone="info">No test run yet. Click 'Run 17 Security Tests' to execute the suite.</Notice>
+        ) : (
           <>
             <ul className="divide-y divide-line border-y border-line">
               {security.map((t, i) => (
-                <motion.li key={t.id + report.ran_at} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.03, duration: 0.3 }}
-                  className="flex items-baseline gap-4 py-2.5 text-sm">
-                  <span className={`w-12 shrink-0 font-semibold ${tone(t.outcome === "passed" ? "allowed" : "failed")}`}>{t.outcome === "passed" ? "Pass" : "Fail"}</span>
-                  <span>{t.title}</span>
+                <motion.li
+                  key={t.id + report.ran_at}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.02, duration: 0.25 }}
+                  className="flex items-baseline gap-4 py-2.5 text-sm"
+                >
+                  <span className={`w-12 shrink-0 font-semibold ${tone(t.outcome === "passed" ? "allowed" : "failed")}`}>
+                    {t.outcome === "passed" ? "Pass" : "Fail"}
+                  </span>
+                  <span className="text-ink">{t.title}</span>
                 </motion.li>
               ))}
             </ul>
-            {other.length > 0 && <p className="mt-2 text-xs text-muted">Plus {other.filter((t) => t.outcome === "passed").length} of {other.length} unit tests passed.</p>}
+            {other.length > 0 && (
+              <p className="mt-2 text-xs text-muted">
+                Plus {other.filter((t) => t.outcome === "passed").length} of {other.length} unit tests passed.
+              </p>
+            )}
           </>
         )}
       </section>
 
       <section>
-        <h2 className="display text-3xl">Activity log</h2>
-        <p className="mt-2 max-w-2xl text-[0.95rem] leading-relaxed text-muted">Records who did what and which documents were involved. Questions and document text are not stored here.</p>
+        <div className="flex flex-wrap items-baseline justify-between gap-4">
+          <div>
+            <h2 className="display text-3xl">Activity Log (Audit Trail)</h2>
+            <p className="mt-1 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
+              Records who did what, target documents, decision status, and correlation ID. Click any row to inspect event details.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button kind="secondary" onClick={() => exportAudit("csv")}>Export CSV</Button>
+            <Button kind="secondary" onClick={() => exportAudit("json")}>Export JSON</Button>
+          </div>
+        </div>
+
         <div className="my-4 flex flex-wrap gap-2" role="group" aria-label="Filter activity">
           {FILTERS.map(([value, label]) => (
-            <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}
-              className={`rounded-full border px-3 py-1 text-xs transition-colors ${filter === value ? "border-ink bg-ink text-white" : "border-line bg-surface hover:border-ink"}`}>{label}</button>
+            <button
+              key={value}
+              aria-pressed={filter === value}
+              onClick={() => setFilter(value)}
+              className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                filter === value
+                  ? "border-ink bg-ink text-white"
+                  : "border-line bg-surface hover:border-ink"
+              }`}
+            >
+              {label}
+            </button>
           ))}
         </div>
-        {events.length === 0 ? <Notice tone="info">No activity matches this filter.</Notice> : (
-          <div className="overflow-x-auto rounded-md border border-line bg-surface">
+
+        {events.length === 0 ? (
+          <Notice tone="info">No activity matches this filter.</Notice>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-line bg-surface">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-line text-muted"><tr>
-                <th className="px-4 py-2.5 font-medium">Time</th><th className="px-4 py-2.5 font-medium">Person</th>
-                <th className="px-4 py-2.5 font-medium">Activity</th><th className="px-4 py-2.5 font-medium">Outcome</th>
-                <th className="px-4 py-2.5 font-medium">Documents involved</th>
-              </tr></thead>
+              <thead className="border-b border-line text-xs text-muted bg-line/20">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Time</th>
+                  <th className="px-4 py-3 font-medium">Person / Actor</th>
+                  <th className="px-4 py-3 font-medium">Activity</th>
+                  <th className="px-4 py-3 font-medium">Outcome</th>
+                  <th className="px-4 py-3 font-medium">Documents Involved</th>
+                  <th className="px-4 py-3 font-medium text-right">Details</th>
+                </tr>
+              </thead>
               <tbody className="divide-y divide-line">
                 {events.map((e) => (
-                  <tr key={e.id}>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-muted">{new Date(e.time).toLocaleTimeString()}</td>
-                    <td className="px-4 py-2.5">{e.user}</td>
-                    <td className="px-4 py-2.5">{ACTIONS[e.action] ?? e.action}</td>
-                    <td className={`px-4 py-2.5 font-medium ${tone(e.decision)}`}>{e.decision === "abstained" ? "no authorized source" : e.decision}</td>
-                    <td className="px-4 py-2.5 text-muted">{e.documents.join(", ") || "none"}</td>
+                  <tr
+                    key={e.id}
+                    onClick={() => setSelectedEvent(e)}
+                    className="cursor-pointer hover:bg-white/60 transition-colors"
+                  >
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-muted font-mono">
+                      {new Date(e.time).toLocaleTimeString()}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-ink">{e.user}</td>
+                    <td className="px-4 py-3 text-ink">{ACTIONS[e.action] ?? e.action}</td>
+                    <td className={`px-4 py-3 font-medium ${tone(e.decision)}`}>
+                      {e.decision === "abstained" ? "no authorized source" : e.decision}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted max-w-xs truncate">
+                      {e.documents.join(", ") || "none"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="text-xs text-accent underline underline-offset-2">Inspect</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -105,6 +214,63 @@ export default function Security() {
           </div>
         )}
       </section>
+
+      {/* Event Details Modal */}
+      {selectedEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-line bg-white p-6 shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-line pb-3">
+              <div>
+                <h3 className="display text-2xl">Audit Event #{selectedEvent.id}</h3>
+                <p className="text-xs text-muted">{new Date(selectedEvent.time).toLocaleString()}</p>
+              </div>
+              <Button kind="secondary" onClick={() => setSelectedEvent(null)}>Close</Button>
+            </div>
+
+            <dl className="mt-4 space-y-2.5 text-xs">
+              <div className="flex justify-between py-1 border-b border-line">
+                <span className="text-muted">Actor:</span>
+                <span className="font-medium text-ink">{selectedEvent.actor || selectedEvent.user}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-line">
+                <span className="text-muted">Action:</span>
+                <span className="font-mono text-ink">{selectedEvent.action}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-line">
+                <span className="text-muted">Decision:</span>
+                <span className={`font-semibold uppercase ${tone(selectedEvent.decision)}`}>
+                  {selectedEvent.decision}
+                </span>
+              </div>
+              {selectedEvent.correlation_id && (
+                <div className="flex justify-between py-1 border-b border-line">
+                  <span className="text-muted">Correlation ID:</span>
+                  <span className="font-mono text-[0.7rem] text-ink">{selectedEvent.correlation_id}</span>
+                </div>
+              )}
+              {selectedEvent.documents?.length > 0 && (
+                <div className="py-1 border-b border-line">
+                  <span className="text-muted block">Documents Involved:</span>
+                  <span className="font-medium text-ink">{selectedEvent.documents.join(", ")}</span>
+                </div>
+              )}
+            </dl>
+
+            {selectedEvent.detail && Object.keys(selectedEvent.detail).length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-xs uppercase tracking-wide text-muted font-semibold">Structured Event Metadata:</h4>
+                <pre className="mt-1.5 rounded-lg border border-line bg-surface p-3 font-mono text-[0.7rem] text-ink overflow-x-auto">
+                  {JSON.stringify(selectedEvent.detail, null, 2)}
+                </pre>
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end">
+              <Button kind="secondary" onClick={() => setSelectedEvent(null)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
