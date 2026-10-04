@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Hanken Grotesk Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+
+  /* Paper, ink and one green. Colour is otherwise reserved for classification. */
+  --color-page: #f7f7f6;
+  --color-surface: #ffffff;
+  --color-ink: #0f1215;
+  --color-muted: #646a72;
+  --color-line: #e2e3e1;
+  --color-accent: #1c4a3a;
+  --color-allow: #1f6b4a;
+  --color-deny: #8c2f2b;
+  --color-warn: #9a6b15;
+  --color-level-0: #7a8088;
+  --color-level-1: #3d5a73;
+  --color-level-2: #9a6b15;
+  --color-level-3: #8c2f2b;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  line-height: 1.04;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-ink);
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
