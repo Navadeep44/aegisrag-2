@@ -95,6 +95,11 @@ export type Message = {
   content: string;
   status: string;
   citations: Citation[];
+  suggested_resource?: {
+    id: string;
+    title: string;
+    classification: number;
+  } | null;
 };
 
 export type ChatReply = {
@@ -103,6 +108,63 @@ export type ChatReply = {
   status: string;
   answer: string;
   citations: Citation[];
+  suggested_resource?: {
+    id: string;
+    title: string;
+    classification: number;
+  } | null;
+};
+
+export type DashboardStats = {
+  scope: "platform" | "tenant";
+  tenants_count?: number;
+  active_tenants?: number;
+  suspended_tenants?: number;
+  total_chunks?: number;
+  total_documents?: number;
+  total_users?: number;
+  total_audits?: number;
+  tenant_id?: string;
+  accessible_documents?: number;
+  classification_counts?: {
+    public: number;
+    internal: number;
+    confidential: number;
+    restricted: number;
+  };
+  document_status_counts?: {
+    active: number;
+    flagged: number;
+    processing: number;
+    failed: number;
+  };
+  pending_requests_count?: number;
+  my_requests_count?: number;
+  total_queries?: number;
+  my_queries?: number;
+  denials_24h?: number;
+  ingestion_jobs?: {
+    queued: number;
+    processing: number;
+    ready: number;
+    failed: number;
+  };
+  department?: {
+    id: string;
+    name: string;
+    members_count: number;
+  } | null;
+};
+
+export type FlaggedDoc = {
+  id: string;
+  title: string;
+  filename: string;
+  classification: number;
+  status: string;
+  note: string;
+  created_at: string;
+  sample_chunks: { page: number; text: string }[];
 };
 
 export type ChatSession = { id: string; title: string; created_at?: string };

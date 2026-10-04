@@ -63,7 +63,16 @@ def allowed_history(conversation: Conversation, readable: set[str]) -> list[dict
             if m["status"] != "redacted"]
 
 
-def answer_question(db: Session, user: User, question: str, conversation_id: str | None) -> dict:
+def answer_question(
+    db: Session,
+    user: User,
+    question: str,
+    conversation_id: str | None,
+    briefing_mode: bool = False,
+) -> dict:
+    from sqlalchemy import select
+    from app.models import Document
+
     conversation = None
     if conversation_id:
         conversation = db.get(Conversation, conversation_id)
@@ -99,9 +108,43 @@ def answer_question(db: Session, user: User, question: str, conversation_id: str
         for cid in valid
     ] if answered else []
 
+    final_answer = result.get("answer", "")
+    if answered and briefing_mode:
+        unique_titles = list(dict.fromkeys(c["title"] for c in citations))
+        final_answer = (
+            f"### 📋 Strategic Executive Briefing\n\n"
+            f"**Executive Summary**\n{final_answer}\n\n"
+            f"**Verified Sources & Evidence**\n"
+            + "\n".join(f"- *{title}*" for title in unique_titles)
+            + f"\n\n**Governance & Policy Compliance**\n"
+            f"- User clearance verified: `{user.clearance_label.upper()}`\n"
+            f"- Information synthesized strictly from authorized organizational knowledge bases."
+        )
+
+    suggested_resource = None
+    if not answered:
+        readable_ids = readable_document_ids(db, user)
+        # Find if an inaccessible document in this tenant might have the answer
+        stmt = select(Document).where(
+            Document.tenant_id == user.tenant_id,
+            Document.status == "active",
+            ~Document.id.in_(readable_ids) if readable_ids else True,
+        )
+        inaccessible = db.execute(stmt).scalars().all()
+        q_tokens = set(ai.tokens(question.lower()))
+        for doc in inaccessible:
+            doc_tokens = set(ai.tokens(doc.title.lower()))
+            if (q_tokens & doc_tokens) or any(t in doc.title.lower() for t in q_tokens if len(t) > 3):
+                suggested_resource = {
+                    "id": doc.id,
+                    "title": doc.title,
+                    "classification": doc.classification,
+                }
+                break
+
     db.add(Message(conversation_id=conversation.id, role="user", content=question))
     reply = Message(conversation_id=conversation.id, role="assistant",
-                    content=result["answer"] if answered else ABSTAIN,
+                    content=final_answer if answered else ABSTAIN,
                     status="answered" if answered else "abstained", citations=citations)
     db.add(reply)
     db.commit()
@@ -110,7 +153,14 @@ def answer_question(db: Session, user: User, question: str, conversation_id: str
               conversation_id=conversation.id,
               context_chunk_ids=sorted(context_ids),
               context_document_ids=sorted({h.document.id for h in hits}),
-              cited_chunk_ids=valid, dropped_citations=dropped)
+              cited_chunk_ids=valid, dropped_citations=dropped,
+              briefing_mode=briefing_mode)
 
-    return {"conversation_id": conversation.id, "message_id": reply.id, "status": reply.status,
-            "answer": reply.content, "citations": citations}
+    return {
+        "conversation_id": conversation.id,
+        "message_id": reply.id,
+        "status": reply.status,
+        "answer": reply.content,
+        "citations": citations,
+        "suggested_resource": suggested_resource,
+    }

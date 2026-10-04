@@ -115,28 +115,53 @@ export default function Security() {
       {/* Security Posture Scorecard */}
       <section className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
         <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-          <p className="text-xs uppercase tracking-wide text-muted">Test Pass Rate</p>
+          <p className="text-xs uppercase tracking-wide text-muted font-mono">Test Pass Rate</p>
           <p className="display mt-1 text-3xl font-semibold text-emerald-700">
             {report?.passed ? `${report.passed}/${(report.passed || 0) + (report.failed || 0)}` : "17/17"}
           </p>
           <p className="text-[0.7rem] text-muted mt-0.5">Automated Attack Suite</p>
         </div>
         <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-          <p className="text-xs uppercase tracking-wide text-muted">Audit Integrity</p>
+          <p className="text-xs uppercase tracking-wide text-muted font-mono">Audit Integrity</p>
           <p className="display mt-1 text-2xl font-semibold text-ink">Immutable</p>
           <p className="text-[0.7rem] text-muted mt-0.5">Append-Only Event Log</p>
         </div>
         <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-          <p className="text-xs uppercase tracking-wide text-muted">Encryption Standard</p>
+          <p className="text-xs uppercase tracking-wide text-muted font-mono">Encryption Standard</p>
           <p className="display mt-1 text-2xl font-semibold text-ink">AES-256-GCM</p>
           <p className="text-[0.7rem] text-muted mt-0.5">In-Transit: TLS 1.3</p>
         </div>
         <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-          <p className="text-xs uppercase tracking-wide text-muted">Pre-Retrieval Gate</p>
+          <p className="text-xs uppercase tracking-wide text-muted font-mono">Pre-Retrieval Gate</p>
           <p className="display mt-1 text-2xl font-semibold text-emerald-700">SQL Level</p>
           <p className="text-[0.7rem] text-muted mt-0.5">Zero Context Leakage</p>
         </div>
       </section>
+
+      {/* Anomaly Detection Banner */}
+      {(() => {
+        const deniedCount = events.filter((e) => e.decision === "denied").length;
+        const flaggedCount = events.filter((e) => e.decision === "flagged" || e.action.includes("injection")).length;
+        if (deniedCount > 0 || flaggedCount > 0) {
+          return (
+            <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-4 text-xs text-amber-900 shadow-xs flex items-center justify-between">
+              <div className="space-y-0.5">
+                <p className="font-semibold flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                  Security Anomaly Oversight: {deniedCount} Denials • {flaggedCount} Flagged Events Recorded
+                </p>
+                <p className="text-amber-800">
+                  SQL pre-inference ACLs successfully blocked unauthorized context retrieval without data exposure.
+                </p>
+              </div>
+              <Button kind="secondary" onClick={() => setFilter("denied")}>
+                Filter Denials ({deniedCount})
+              </Button>
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       {error && <div><Notice tone="error">{error}</Notice></div>}
       {notice && <div><Notice tone="info">{notice}</Notice></div>}

@@ -2,13 +2,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { Banded, Level } from "../components/ui/Classification";
+import { inputClass, smallSelectClass } from "../components/ui/field";
 import { Notice } from "../components/ui/Notice";
 import { PageHeader } from "../components/ui/PageHeader";
 import { useAuth } from "../context/AuthContext";
 import { AccessEditor } from "../features/documents/AccessEditor";
 import { UploadForm } from "../features/documents/UploadForm";
 import { api, imageUrl, post } from "../lib/api";
-import type { Department, Doc, DocStatus, Grant, Role, User } from "../lib/types";
+import type { Department, Doc, DocStatus, FlaggedDoc, Grant, Role, User } from "../lib/types";
 import { hasPermission } from "../lib/types";
 
 export default function Documents() {
@@ -28,21 +29,45 @@ export default function Documents() {
   // Ingestion job status modal
   const [jobStatus, setJobStatus] = useState<DocStatus | null>(null);
 
+  // Flagged Quarantine Drawer / Modal
+  const [flaggedDocs, setFlaggedDocs] = useState<FlaggedDoc[]>([]);
+  const [reviewingFlagged, setReviewingFlagged] = useState<FlaggedDoc | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+
+  // Delegated Request Modal (for Team Leads, Dept Managers & Admins)
+  const [delegatingDoc, setDelegatingDoc] = useState<Doc | null>(null);
+  const [delegateTargetUser, setDelegateTargetUser] = useState<string>("");
+  const [delegateReason, setDelegateReason] = useState<string>("");
+  const [delegateSubmitting, setDelegateSubmitting] = useState(false);
+
   const canUpload = hasPermission(user, "document.upload");
   const canManageGrants = hasPermission(user, "document.grant.manage");
   const canDelete = hasPermission(user, "document.delete");
   const canManage = canUpload || canManageGrants;
+  const isDocManager = user?.roles?.includes("document_manager") || user?.roles?.includes("admin") || user?.is_admin;
+  const isDeptLead = user?.roles?.includes("department_manager") || user?.roles?.includes("team_lead") || isDocManager;
+  const isHr = user?.roles?.includes("hr");
+  const isAuditor = user?.roles?.includes("security_auditor");
 
-  const load = () => api<Doc[]>("/documents").then(setDocs).catch((e) => setError(e.message));
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilterTab, setActiveFilterTab] = useState<string>("all");
+
+  const load = () => {
+    api<Doc[]>("/documents").then(setDocs).catch((e) => setError(e.message));
+    if (isDocManager) {
+      api<FlaggedDoc[]>("/documents/flagged").then(setFlaggedDocs).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     load();
-    if (canManage) {
+    if (canManage || isDeptLead) {
       api<Role[]>("/roles").then(setRoles).catch(() => {});
       api<User[]>("/users").then(setUsers).catch(() => {});
       api<Department[]>("/departments").then(setDepartments).catch(() => {});
     }
-  }, [canManage]);
+  }, [canManage, isDeptLead]);
 
   // Keep polling while something is still being processed.
   useEffect(() => {
@@ -111,13 +136,49 @@ export default function Documents() {
     }
   }
 
-  const isDocManager = user?.roles?.includes("document_manager") || user?.roles?.includes("admin") || user?.is_admin;
-  const isHr = user?.roles?.includes("hr");
-  const isAuditor = user?.roles?.includes("security_auditor");
-  const isDeptLead = user?.roles?.includes("department_manager") || user?.roles?.includes("team_lead");
+  async function handleFlaggedDecision(docId: string, decision: "approve" | "purge") {
+    setReviewBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await post(`/documents/${docId}/review-flagged`, {
+        decision,
+        note: reviewNote.trim() || undefined,
+      });
+      setNotice(decision === "approve" ? "Document approved and activated." : "Flagged document purged.");
+      setReviewingFlagged(null);
+      setReviewNote("");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setReviewBusy(false);
+    }
+  }
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeFilterTab, setActiveFilterTab] = useState<string>("all");
+  async function submitDelegatedRequest(e: React.FormEvent) {
+    e.preventDefault();
+    if (!delegatingDoc || !delegateTargetUser || !delegateReason.trim()) return;
+    setDelegateSubmitting(true);
+    setError("");
+    setNotice("");
+    try {
+      await post("/access-requests", {
+        resource_type: "document",
+        resource_id: delegatingDoc.id,
+        target_user_id: delegateTargetUser,
+        reason: delegateReason.trim(),
+      });
+      setNotice(`Delegated access request submitted for teammate.`);
+      setDelegatingDoc(null);
+      setDelegateTargetUser("");
+      setDelegateReason("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDelegateSubmitting(false);
+    }
+  }
 
   const filteredDocs = (docs || []).filter((d) => {
     if (searchQuery.trim()) {
@@ -157,20 +218,30 @@ export default function Documents() {
       {isDocManager && docs && (
         <section className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
           <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-            <p className="text-xs uppercase tracking-wide text-muted">Total Ingested</p>
+            <p className="text-xs uppercase tracking-wide text-muted font-mono">Total Ingested</p>
             <p className="display mt-1 text-3xl font-semibold text-ink">{docs.length}</p>
           </div>
           <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-            <p className="text-xs uppercase tracking-wide text-muted">Active in Vector DB</p>
+            <p className="text-xs uppercase tracking-wide text-muted font-mono">Active in Vector DB</p>
             <p className="display mt-1 text-3xl font-semibold text-emerald-700">{activeCount}</p>
           </div>
           <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-            <p className="text-xs uppercase tracking-wide text-muted">Processing Queue</p>
+            <p className="text-xs uppercase tracking-wide text-muted font-mono">Processing Queue</p>
             <p className="display mt-1 text-3xl font-semibold text-sky-700">{processingCount}</p>
           </div>
           <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-            <p className="text-xs uppercase tracking-wide text-muted">Flagged Injections</p>
-            <p className="display mt-1 text-3xl font-semibold text-amber-700">{flaggedCount}</p>
+            <p className="text-xs uppercase tracking-wide text-muted font-mono">Flagged Injections</p>
+            <div className="mt-1 flex items-baseline justify-between">
+              <p className="display text-3xl font-semibold text-amber-700">{flaggedDocs.length || flaggedCount}</p>
+              {flaggedDocs.length > 0 && (
+                <button
+                  onClick={() => setReviewingFlagged(flaggedDocs[0])}
+                  className="text-xs text-amber-700 underline underline-offset-2 font-medium"
+                >
+                  Review Quarantine →
+                </button>
+              )}
+            </div>
           </div>
         </section>
       )}
@@ -207,7 +278,7 @@ export default function Documents() {
                 onClick={() => setActiveFilterTab("flagged")}
                 className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "flagged" ? "bg-amber-700 font-medium text-white" : "border border-line bg-surface text-muted hover:text-amber-700"}`}
               >
-                Flagged Injections ({flaggedCount})
+                Flagged Injections ({flaggedDocs.length || flaggedCount})
               </button>
             </>
           )}
@@ -297,6 +368,32 @@ export default function Documents() {
                           Page Preview
                         </Button>
                       )}
+                      {/* Delegated access request button for Team Leads & Dept Managers */}
+                      {isDeptLead && users.length > 0 && (
+                        <Button kind="secondary" onClick={() => setDelegatingDoc(doc)}>
+                          Request for Teammate
+                        </Button>
+                      )}
+                      {doc.flagged && isDocManager && (
+                        <Button
+                          kind="primary"
+                          onClick={() => {
+                            const found = flaggedDocs.find((f) => f.id === doc.id);
+                            setReviewingFlagged(found || {
+                              id: doc.id,
+                              title: doc.title,
+                              filename: doc.filename,
+                              classification: doc.classification,
+                              status: doc.status,
+                              note: doc.note,
+                              created_at: "",
+                              sample_chunks: [],
+                            });
+                          }}
+                        >
+                          Review Flagged
+                        </Button>
+                      )}
                       {canManage && (
                         <Button kind="secondary" onClick={() => inspectJob(doc)}>
                           Job Status
@@ -370,6 +467,129 @@ export default function Documents() {
         </div>
       )}
 
+      {/* Flagged Document Quarantine Review Modal */}
+      {reviewingFlagged && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-line bg-surface p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-line pb-3">
+              <div>
+                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                  Quarantine Review
+                </span>
+                <h3 className="display text-2xl mt-1 text-ink">{reviewingFlagged.title}</h3>
+                <p className="text-xs text-muted font-mono">{reviewingFlagged.filename}</p>
+              </div>
+              <Button kind="secondary" onClick={() => setReviewingFlagged(null)} disabled={reviewBusy}>
+                Close
+              </Button>
+            </div>
+
+            <div className="rounded-lg border border-amber-300 bg-amber-50/50 p-4 text-xs space-y-1">
+              <p className="font-semibold text-amber-900">Ingestion Sanitizer Flag Reasoning:</p>
+              <p className="text-amber-800">{reviewingFlagged.note || "Indirect prompt injection pattern detected during ingestion extraction."}</p>
+            </div>
+
+            {reviewingFlagged.sample_chunks.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted font-mono">Sample Extracted Chunk Excerpts:</p>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {reviewingFlagged.sample_chunks.map((chunk, idx) => (
+                    <div key={idx} className="rounded-md border border-line bg-bg p-3 text-xs font-mono text-muted">
+                      <span className="font-semibold text-ink">Page {chunk.page}: </span>
+                      {chunk.text}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Auditor / Review Note (Optional):</label>
+              <input
+                className={inputClass}
+                placeholder="e.g. Verified harmless sample document text, confirmed safe for indexing."
+                value={reviewNote}
+                onChange={(e) => setReviewNote(e.target.value)}
+                disabled={reviewBusy}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-line">
+              <Button
+                kind="danger"
+                onClick={() => handleFlaggedDecision(reviewingFlagged.id, "purge")}
+                disabled={reviewBusy}
+              >
+                Purge & Delete File
+              </Button>
+              <Button
+                kind="primary"
+                onClick={() => handleFlaggedDecision(reviewingFlagged.id, "approve")}
+                disabled={reviewBusy}
+              >
+                {reviewBusy ? "Saving..." : "✓ Approve & Activate in Vector DB"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delegated Access Request Modal */}
+      {delegatingDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-6 shadow-xl space-y-4">
+            <h3 className="display text-xl font-semibold text-ink">Request Access for Team Member</h3>
+            <p className="text-xs text-muted">
+              Submit a delegated grant request for <strong className="text-ink">{delegatingDoc.title}</strong> on behalf of a teammate.
+            </p>
+
+            <form onSubmit={submitDelegatedRequest} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-ink mb-1">Select Teammate *</label>
+                <select
+                  className={inputClass}
+                  value={delegateTargetUser}
+                  onChange={(e) => setDelegateTargetUser(e.target.value)}
+                  required
+                >
+                  <option value="">Choose a team member...</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.roles.join(", ")} • Clearance L{u.clearance})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-ink mb-1">Business Justification *</label>
+                <textarea
+                  className={`${inputClass} min-h-[90px]`}
+                  placeholder="Explain why this team member requires access to this document for their project assignment..."
+                  value={delegateReason}
+                  onChange={(e) => setDelegateReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  kind="secondary"
+                  onClick={() => { setDelegatingDoc(null); setDelegateTargetUser(""); setDelegateReason(""); }}
+                  disabled={delegateSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={delegateSubmitting || !delegateTargetUser || !delegateReason.trim()}>
+                  {delegateSubmitting ? "Submitting..." : "Submit Delegated Request"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Job Status Modal */}
       {jobStatus && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -378,34 +598,30 @@ export default function Documents() {
             <div className="mt-4 space-y-2.5 text-xs">
               <div className="flex justify-between py-1 border-b border-line">
                 <span className="text-muted">Document ID:</span>
-                <span className="font-mono text-ink">{jobStatus.document_id}</span>
+                <span className="font-mono">{jobStatus.document_id}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Job Status:</span>
-                <span className="font-semibold uppercase text-ink">{jobStatus.job_status}</span>
+                <span className="text-muted">Status:</span>
+                <span className="font-semibold">{jobStatus.status}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Current Stage:</span>
-                <span className="font-mono text-ink">{jobStatus.stage}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Version:</span>
-                <span className="font-mono text-ink">v{jobStatus.version}</span>
+                <span className="text-muted">Pipeline Stage:</span>
+                <span className="font-semibold capitalize text-accent">{jobStatus.stage}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-line">
                 <span className="text-muted">Page Count:</span>
-                <span className="font-mono text-ink">{jobStatus.page_count}</span>
+                <span>{jobStatus.page_count}</span>
               </div>
               {jobStatus.checksum && (
-                <div className="py-1 border-b border-line">
-                  <span className="text-muted block">Checksum (SHA-256):</span>
-                  <span className="font-mono text-[0.65rem] break-all text-ink">{jobStatus.checksum}</span>
+                <div className="flex justify-between py-1 border-b border-line">
+                  <span className="text-muted">Checksum:</span>
+                  <span className="font-mono text-[0.7rem]">{jobStatus.checksum.slice(0, 16)}…</span>
                 </div>
               )}
               {jobStatus.note && (
                 <div className="py-1">
-                  <span className="text-muted block">Note:</span>
-                  <span className="text-ink">{jobStatus.note}</span>
+                  <span className="text-muted">Note:</span>
+                  <p className="mt-0.5 text-ink font-medium">{jobStatus.note}</p>
                 </div>
               )}
             </div>

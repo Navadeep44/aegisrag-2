@@ -24,7 +24,9 @@ export function AppShell() {
   const isFinance = roles.includes("finance");
   const isEngineering = roles.includes("engineering");
 
-  const links: [string, string][] = [];
+  const links: [string, string][] = [
+    ["dashboard", "Workspace Hub"],
+  ];
 
   if (isPlatformAdmin) {
     links.push(["platform", "Platform Ops"]);

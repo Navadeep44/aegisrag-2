@@ -579,6 +579,29 @@ export default function UsersAndRoles() {
                   ))}
                 </div>
               </div>
+
+              {/* Separation of Duties (SoD) Conflict Detection */}
+              {(() => {
+                const conflicts: string[] = [];
+                if (assignRolesList.includes("document_manager") && assignRolesList.includes("security_auditor")) {
+                  conflicts.push("Document Manager (Author) + Security Auditor (Oversight)");
+                }
+                if (assignRolesList.includes("iam_admin") && assignRolesList.includes("security_auditor")) {
+                  conflicts.push("IAM Admin (Privilege Assigner) + Security Auditor (Auditor)");
+                }
+                if (conflicts.length > 0) {
+                  return (
+                    <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
+                      <p className="font-semibold">⚠️ Separation of Duties (SoD) Conflict Warning:</p>
+                      {conflicts.map((c, idx) => (
+                        <p key={idx} className="text-amber-800">• High risk privilege accumulation: {c}</p>
+                      ))}
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
               <div className="flex justify-end gap-2 pt-2">
                 <Button kind="secondary" type="button" onClick={() => setShowAssignModal(null)}>Cancel</Button>
                 <Button type="submit">Save Changes</Button>

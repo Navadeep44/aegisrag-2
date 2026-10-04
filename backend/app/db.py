@@ -31,11 +31,23 @@ def get_db():
 
 def init_db() -> None:
     from app.models import Base
+    import sqlalchemy as sa
 
     if IS_POSTGRES:
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(engine)
+
+    # Automatically add any missing columns for existing tables (e.g. schema updates)
+    inspector = sa.inspect(engine)
+    with engine.begin() as conn:
+        for table_name, table in Base.metadata.tables.items():
+            if inspector.has_table(table_name):
+                existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+                for col in table.columns:
+                    if col.name not in existing_cols:
+                        col_type = col.type.compile(engine.dialect)
+                        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}"))
 
 
 def database_status() -> dict:

@@ -467,3 +467,44 @@ def test_team_lead_delegated_access_request(client, db, login):
         ).delete()
         db.commit()
 
+
+def test_dashboard_stats_endpoint(client, login):
+    """Dashboard stats endpoint returns structured metrics for platform and tenant users"""
+    super_token = login(SUPER_ADMIN)
+    super_stats = client.get("/api/dashboard/stats", headers=super_token)
+    assert super_stats.status_code == 200
+    assert super_stats.json()["scope"] == "platform"
+    assert super_stats.json()["tenants_count"] >= 2
+
+    emp_token = login(EMPLOYEE)
+    emp_stats = client.get("/api/dashboard/stats", headers=emp_token)
+    assert emp_stats.status_code == 200
+    assert emp_stats.json()["scope"] == "tenant"
+    assert "classification_counts" in emp_stats.json()
+    assert "accessible_documents" in emp_stats.json()
+
+
+def test_audit_export_json_and_csv(client, login):
+    """Audit export returns JSON or CSV for users with audit.read permission"""
+    auditor_token = login(AUDITOR)
+    
+    # JSON export
+    res_json = client.get("/api/audit/export?format=json", headers=auditor_token)
+    assert res_json.status_code == 200
+    assert "application/json" in res_json.headers["content-type"]
+    assert isinstance(res_json.json(), list)
+
+    # CSV export
+    res_csv = client.get("/api/audit/export?format=csv", headers=auditor_token)
+    assert res_csv.status_code == 200
+    assert "text/csv" in res_csv.headers["content-type"]
+    assert "ID,Timestamp,Actor" in res_csv.text
+
+
+def test_flagged_documents_review(client, db, login):
+    """Document Manager can list flagged files and review them"""
+    doc_mgr_token = login(DOC_MANAGER)
+    flagged_list = client.get("/api/documents/flagged", headers=doc_mgr_token)
+    assert flagged_list.status_code == 200
+    assert isinstance(flagged_list.json(), list)
+

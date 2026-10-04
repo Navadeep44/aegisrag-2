@@ -50,6 +50,16 @@ const ROLE_PROMPTS: Record<string, { roleTitle: string; scopeDesc: string; quest
       "What are the key IT onboarding security requirements?",
     ],
   },
+  executive: {
+    roleTitle: "Executive Strategic Intelligence",
+    scopeDesc: "Authorized to query cross-departmental strategic reports, revenue forecasts, and platform architecture with Level 2 clearance.",
+    questions: [
+      "Summarize our FY2025 financial performance and strategic priorities",
+      "What is the platform architecture and database isolation design?",
+      "What are the core HR leave policies across employee levels?",
+      "Provide a cross-departmental executive synthesis on current operational risks.",
+    ],
+  },
   department_manager: {
     roleTitle: "Department Leadership Workspace",
     scopeDesc: "Authorized to query department technical specifications, team workflows, and corporate leave policies.",
@@ -112,6 +122,15 @@ export default function Chat() {
   const [error, setError] = useState("");
   const [source, setSource] = useState<Citation | null>(null);
   const [activeCategory, setActiveCategory] = useState<"tailored" | "all" | "finance" | "hr" | "engineering">("tailored");
+  const [briefingMode, setBriefingMode] = useState(false);
+
+  // In-chat Access Request Modal state
+  const [requestResource, setRequestResource] = useState<{ id: string; title: string } | null>(null);
+  const [requestReason, setRequestReason] = useState("");
+  const [requestSubmitting, setRequestSubmitting] = useState(false);
+  const [requestNotice, setRequestNotice] = useState("");
+  const [requestError, setRequestError] = useState("");
+
   const bottom = useRef<HTMLDivElement>(null);
 
   const roles = user?.roles || [];
@@ -119,6 +138,7 @@ export default function Chat() {
     roles.find((r) => r === "hr") ||
     roles.find((r) => r === "finance") ||
     roles.find((r) => r === "engineering") ||
+    roles.find((r) => r === "executive") ||
     roles.find((r) => r === "organization_owner") ||
     roles.find((r) => r === "department_manager") ||
     roles.find((r) => r === "team_lead") ||
@@ -138,9 +158,22 @@ export default function Chat() {
     setError(""); setBusy(true); setQuestion("");
     setMessages((m) => [...m, { role: "user", content: trimmed, status: "", citations: [] }]);
     try {
-      const reply = await post<ChatReply>("/chat/query", { question: trimmed, conversation_id: conversationId });
+      const reply = await post<ChatReply>("/chat/query", {
+        question: trimmed,
+        conversation_id: conversationId,
+        briefing_mode: briefingMode,
+      });
       setConversationId(reply.conversation_id);
-      setMessages((m) => [...m, { role: "assistant", content: reply.answer, status: reply.status, citations: reply.citations }]);
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: reply.answer,
+          status: reply.status,
+          citations: reply.citations,
+          suggested_resource: reply.suggested_resource,
+        },
+      ]);
       setSource(reply.citations[0] ?? null);
       loadSessions();
     } catch (e) {
@@ -157,6 +190,31 @@ export default function Chat() {
       const session = await api<{ id: string; messages: Message[] }>(`/chat/sessions/${id}`);
       setConversationId(session.id); setMessages(session.messages); setSource(null);
     } catch (e) { setError((e as Error).message); }
+  }
+
+  async function submitAccessRequest(e: React.FormEvent) {
+    e.preventDefault();
+    if (!requestResource || !requestReason.trim()) return;
+    setRequestSubmitting(true);
+    setRequestError("");
+    setRequestNotice("");
+    try {
+      await post("/access-requests", {
+        resource_type: "document",
+        resource_id: requestResource.id,
+        reason: requestReason.trim(),
+      });
+      setRequestNotice(`Access request submitted for "${requestResource.title}".`);
+      setTimeout(() => {
+        setRequestResource(null);
+        setRequestReason("");
+        setRequestNotice("");
+      }, 1800);
+    } catch (err) {
+      setRequestError((err as Error).message);
+    } finally {
+      setRequestSubmitting(false);
+    }
   }
 
   let promptList = config.questions;
@@ -182,7 +240,18 @@ export default function Chat() {
               <span className="text-xs uppercase tracking-wider font-semibold text-accent">{config.roleTitle}</span>
               <p className="mt-0.5 text-xs text-muted leading-relaxed">{config.scopeDesc}</p>
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-3">
+              {/* Executive Briefing Mode Toggle */}
+              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-ink font-medium select-none">
+                <input
+                  type="checkbox"
+                  checked={briefingMode}
+                  onChange={(e) => setBriefingMode(e.target.checked)}
+                  className="rounded border-line text-accent focus:ring-accent"
+                />
+                Executive Briefing Mode
+              </label>
+
               <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[0.7rem] font-semibold text-white">
                 Clearance: {user?.clearance_label || "Internal"} (L{user?.clearance ?? 1})
               </span>
@@ -192,8 +261,12 @@ export default function Chat() {
 
         <div className="mb-4 flex items-center gap-3">
           <h1 className="display text-3xl">Ask</h1>
-          <select aria-label="Earlier conversations" className={`${inputClass} ml-auto max-w-xs`}
-            value={conversationId ?? ""} onChange={(e) => open(e.target.value)}>
+          <select
+            aria-label="Earlier conversations"
+            className={`${inputClass} ml-auto max-w-xs`}
+            value={conversationId ?? ""}
+            onChange={(e) => open(e.target.value)}
+          >
             <option value="">New conversation</option>
             {sessions.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
@@ -208,7 +281,7 @@ export default function Chat() {
                   onClick={() => setActiveCategory("tailored")}
                   className={`rounded-full px-2.5 py-1 transition-colors ${activeCategory === "tailored" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
                 >
-                  Tailored for {user?.name || "You"}
+                  Tailored for {user?.name.split(" ")[0] || "You"}
                 </button>
                 <button
                   onClick={() => setActiveCategory("all")}
@@ -255,15 +328,31 @@ export default function Chat() {
               </div>
             </div>
           )}
-          {messages.map((m, i) => <MessageBubble key={i} message={m} selected={source} onSelect={setSource} />)}
+
+          {messages.map((m, i) => (
+            <MessageBubble
+              key={i}
+              message={m}
+              selected={source}
+              onSelect={setSource}
+              onRequestAccess={(res) => setRequestResource(res)}
+            />
+          ))}
+
           {busy && <p className="text-sm text-muted" aria-live="polite">Searching the documents you can read…</p>}
           <div ref={bottom} />
         </div>
 
         {error && <div className="mb-2"><Notice tone="error">{error}</Notice></div>}
         <form className="flex gap-2 pt-2" onSubmit={(e) => { e.preventDefault(); ask(question); }}>
-          <input className={inputClass} placeholder="Ask a question about authorized enterprise documents..." aria-label="Question" value={question}
-            maxLength={2000} onChange={(e) => setQuestion(e.target.value)} />
+          <input
+            className={inputClass}
+            placeholder={briefingMode ? "Ask for a Strategic Executive Briefing across authorized documents..." : "Ask a question about authorized enterprise documents..."}
+            aria-label="Question"
+            value={question}
+            maxLength={2000}
+            onChange={(e) => setQuestion(e.target.value)}
+          />
           <Button type="submit" disabled={busy || !question.trim()}>Ask</Button>
         </form>
       </section>
@@ -285,6 +374,48 @@ export default function Chat() {
           )}
         </AnimatePresence>
       </aside>
+
+      {/* In-Chat Access Request Modal */}
+      {requestResource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-6 shadow-xl space-y-4">
+            <h3 className="display text-xl font-semibold text-ink">Request Document Access</h3>
+            <p className="text-xs text-muted">
+              Request access to <strong className="text-ink">{requestResource.title}</strong> for your account ({user?.name}).
+            </p>
+
+            {requestNotice && <Notice tone="info">{requestNotice}</Notice>}
+            {requestError && <Notice tone="error">{requestError}</Notice>}
+
+            <form onSubmit={submitAccessRequest} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-ink mb-1">Business Justification *</label>
+                <textarea
+                  className={`${inputClass} min-h-[90px]`}
+                  placeholder="Explain why access to this document is required for your role or project task..."
+                  value={requestReason}
+                  onChange={(e) => setRequestReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  kind="secondary"
+                  onClick={() => { setRequestResource(null); setRequestError(""); }}
+                  disabled={requestSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={requestSubmitting || !requestReason.trim()}>
+                  {requestSubmitting ? "Submitting..." : "Submit Request"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

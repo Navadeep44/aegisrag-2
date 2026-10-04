@@ -65,6 +65,7 @@ class DemoLoginIn(BaseModel):
 class QueryIn(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     conversation_id: str | None = None
+    briefing_mode: bool = False
 
 
 class Grant(BaseModel):
@@ -884,7 +885,9 @@ def chat_query(
     db: Session = Depends(get_db),
 ) -> dict:
     chat.check_rate_limit(user.id)
-    return chat.answer_question(db, user, body.question.strip(), body.conversation_id)
+    return chat.answer_question(
+        db, user, body.question.strip(), body.conversation_id, briefing_mode=body.briefing_mode
+    )
 
 
 @router.get("/chat/sessions")
@@ -1616,3 +1619,155 @@ def hr_offboard_employee(
         reason=body.reason,
     )
     return user_out(target_user)
+
+
+# ---------- Dashboard Stats, Audit Export & Flagged Document Quarantine ----------
+
+class ReviewFlaggedIn(BaseModel):
+    decision: str  # approve | purge
+    note: str | None = None
+
+
+@router.get("/dashboard/stats")
+def get_dashboard_stats(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    is_platform_admin = user.is_platform_admin or "platform_super_admin" in user.role_names
+    if is_platform_admin:
+        tenants = db.execute(select(Tenant)).scalars().all()
+        total_chunks = db.execute(select(func.count(Chunk.id))).scalar() or 0
+        total_docs = db.execute(select(func.count(Document.id))).scalar() or 0
+        total_users = db.execute(select(func.count(User.id))).scalar() or 0
+        total_audits = db.execute(select(func.count(AuditEvent.id))).scalar() or 0
+        return {
+            "scope": "platform",
+            "tenants_count": len(tenants),
+            "active_tenants": sum(1 for t in tenants if t.status == "active"),
+            "suspended_tenants": sum(1 for t in tenants if t.status == "suspended"),
+            "total_chunks": total_chunks,
+            "total_documents": total_docs,
+            "total_users": total_users,
+            "total_audits": total_audits,
+        }
+
+    t_id = user.tenant_id
+    total_users = db.execute(select(func.count(User.id)).where(User.tenant_id == t_id)).scalar() or 0
+    all_docs = db.execute(select(Document).where(Document.tenant_id == t_id)).scalars().all()
+    readable_ids = readable_document_ids(db, user)
+
+    class_counts = {0: 0, 1: 0, 2: 0, 3: 0}
+    status_counts = {"active": 0, "flagged": 0, "processing": 0, "failed": 0}
+    for d in all_docs:
+        class_counts[d.classification] = class_counts.get(d.classification, 0) + 1
+        status_counts[d.status] = status_counts.get(d.status, 0) + 1
+
+    pending_requests_count = db.execute(
+        select(func.count(AccessRequest.id)).where(AccessRequest.tenant_id == t_id, AccessRequest.decision == "pending")
+    ).scalar() or 0
+    my_requests_count = db.execute(
+        select(func.count(AccessRequest.id)).where(AccessRequest.tenant_id == t_id, AccessRequest.requester_id == user.id)
+    ).scalar() or 0
+
+    total_queries = db.execute(
+        select(func.count(AuditEvent.id)).where(AuditEvent.tenant_id == t_id, AuditEvent.action == "chat.query")
+    ).scalar() or 0
+    my_queries = db.execute(
+        select(func.count(AuditEvent.id)).where(AuditEvent.tenant_id == t_id, AuditEvent.user_id == user.id, AuditEvent.action == "chat.query")
+    ).scalar() or 0
+
+    cutoff = now() - timedelta(days=1)
+    denials_24h = db.execute(
+        select(func.count(AuditEvent.id)).where(AuditEvent.tenant_id == t_id, AuditEvent.decision == "denied", AuditEvent.created_at >= cutoff)
+    ).scalar() or 0
+
+    jobs = db.execute(select(IngestionJob).where(IngestionJob.tenant_id == t_id)).scalars().all()
+    jobs_summary = {
+        "queued": sum(1 for j in jobs if j.status == "queued"),
+        "processing": sum(1 for j in jobs if j.status == "processing"),
+        "ready": sum(1 for j in jobs if j.status == "ready"),
+        "failed": sum(1 for j in jobs if j.status == "failed"),
+    }
+
+    dept_info = None
+    if user.department_id:
+        dept = db.get(Department, user.department_id)
+        if dept:
+            dept_users_count = db.execute(select(func.count(User.id)).where(User.department_id == dept.id)).scalar() or 0
+            dept_info = {
+                "id": dept.id,
+                "name": dept.name,
+                "members_count": dept_users_count,
+            }
+
+    return {
+        "scope": "tenant",
+        "tenant_id": t_id,
+        "total_users": total_users,
+        "total_documents": len(all_docs),
+        "accessible_documents": len(readable_ids),
+        "classification_counts": {
+            "public": class_counts.get(0, 0),
+            "internal": class_counts.get(1, 0),
+            "confidential": class_counts.get(2, 0),
+            "restricted": class_counts.get(3, 0),
+        },
+        "document_status_counts": status_counts,
+        "pending_requests_count": pending_requests_count,
+        "my_requests_count": my_requests_count,
+        "total_queries": total_queries,
+        "my_queries": my_queries,
+        "denials_24h": denials_24h,
+        "ingestion_jobs": jobs_summary,
+        "department": dept_info,
+    }
+
+
+@router.get("/documents/flagged")
+def list_flagged_documents(
+    user: User = Depends(require_any_permission("document.metadata.read", "document.classify", "tenant.manage")),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    docs = db.execute(
+        select(Document).where(Document.tenant_id == user.tenant_id, Document.flagged == True)
+    ).scalars().all()
+    out = []
+    for d in docs:
+        chunks = db.execute(select(Chunk).where(Chunk.document_id == d.id).limit(5)).scalars().all()
+        out.append({
+            "id": d.id,
+            "title": d.title,
+            "filename": d.filename,
+            "classification": d.classification,
+            "status": d.status,
+            "note": d.note,
+            "created_at": iso(d.created_at),
+            "sample_chunks": [{"page": c.page, "text": c.text[:300]} for c in chunks],
+        })
+    return out
+
+
+@router.post("/documents/{doc_id}/review-flagged")
+def review_flagged_document(
+    doc_id: str,
+    body: ReviewFlaggedIn,
+    user: User = Depends(require_any_permission("document.classify", "tenant.manage")),
+    db: Session = Depends(get_db),
+) -> dict:
+    doc = db.get(Document, doc_id)
+    if not doc or doc.tenant_id != user.tenant_id:
+        raise HTTPException(404, "Document not found.")
+
+    if body.decision == "approve":
+        doc.flagged = False
+        doc.status = "active"
+        doc.note = f"Approved after quarantine review by {user.name}: {body.note or 'Verified safe'}"
+        audit_action = "document.flagged.approved"
+    else:
+        ingestion.delete_document_data(doc)
+        db.delete(doc)
+        audit_action = "document.flagged.purged"
+
+    db.commit()
+    audit.log(db, user.tenant_id, user.id, audit_action, "allowed", document_id=doc_id, note=body.note)
+    return {"status": "ok", "decision": body.decision}

@@ -242,6 +242,10 @@ class User(Base):
                 perms.update(DEFAULT_ROLE_PERMISSIONS[r.name])
         return perms
 
+    @property
+    def clearance_label(self) -> str:
+        return LEVELS[self.clearance] if 0 <= self.clearance < len(LEVELS) else "internal"
+
     def has_permission(self, perm: str) -> bool:
         return perm in self.permissions
 
