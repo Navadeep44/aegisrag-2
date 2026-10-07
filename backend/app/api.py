@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app import audit, chat, ingestion, retrieval
+from app import audit, chat, ingestion, page_renderer, retrieval
 from app.auth import (
     current_user,
     hash_password,
@@ -870,9 +870,17 @@ def page_image(
     if not can_read(db, user, document_id):
         audit.log(db, user.tenant_id, user.id, "document.read", "denied", document_id=document_id)
         raise HTTPException(404, "Document not found.")
-    path = ingestion.page_image_path(db.get(Document, document_id), page)
+    doc = db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(404, "Document not found.")
+    path = ingestion.page_image_path(doc, page)
     if not path.is_file():
-        raise HTTPException(404, "No preview for this page.")
+        # Render on demand
+        orig = ingestion.doc_dir(doc) / ("original" + Path(doc.filename).suffix.lower())
+        chunks = db.query(Chunk).filter(Chunk.document_id == doc.id).all()
+        rendered = page_renderer.render_document_page(doc, page, orig, path, fallback_chunks=chunks)
+        if not rendered or not path.is_file():
+            raise HTTPException(404, "No preview for this page.")
     return FileResponse(path, media_type="image/png")
 
 

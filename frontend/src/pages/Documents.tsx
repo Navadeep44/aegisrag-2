@@ -18,6 +18,9 @@ import {
   MoreVertical,
   UserPlus,
   Layers,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Button } from "../components/ui/Button";
@@ -59,6 +62,7 @@ export default function Documents() {
   const [previewPage, setPreviewPage] = useState(1);
   const [previewImgUrl, setPreviewImgUrl] = useState<string | null>(null);
   const [previewImgLoading, setPreviewImgLoading] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState(1);
 
   // Ingestion job status
   const [jobStatus, setJobStatus] = useState<DocStatus | null>(null);
@@ -124,15 +128,20 @@ export default function Documents() {
 
   // Load preview image when selectedDoc or previewPage changes
   useEffect(() => {
-    if (!selectedDoc || selectedDoc.page_count === 0) {
+    if (!selectedDoc) {
       setPreviewImgUrl(null);
       return;
     }
     setPreviewImgLoading(true);
+    setPreviewZoom(1);
     let cancelled = false;
-    imageUrl(`/documents/${selectedDoc.id}/pages/${previewPage}`)
+    const pageToLoad = Math.max(1, previewPage);
+    imageUrl(`/documents/${selectedDoc.id}/pages/${pageToLoad}`)
       .then((u) => {
         if (!cancelled) setPreviewImgUrl(u);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewImgUrl(null);
       })
       .finally(() => {
         if (!cancelled) setPreviewImgLoading(false);
@@ -640,21 +649,14 @@ export default function Documents() {
             {/* TAB 2: Page Previews */}
             {docDrawerTab === "pages" && (
               <div className="space-y-4">
-                {selectedDoc.page_count === 0 ? (
-                  <div className="rounded-xl border border-dashed border-line bg-surface-subtle p-6 text-center text-xs text-muted space-y-2">
-                    <p className="font-semibold text-ink">0 Readable Pages Rendered</p>
-                    <p>
-                      This file was ingested as a tabular spreadsheet or raw text format. Optical page snapshots are generated for PDF and image scans.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+                    <div className="flex items-center gap-2">
                       <span className="text-xs text-muted font-mono">
-                        Viewing Page {previewPage} of {selectedDoc.page_count}
+                        Page {previewPage} of {Math.max(1, selectedDoc.page_count)}
                       </span>
                       {selectedDoc.page_count > 1 && (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
                           <Button
                             kind="secondary"
                             disabled={previewPage <= 1}
@@ -673,21 +675,73 @@ export default function Documents() {
                       )}
                     </div>
 
-                    <div className="flex min-h-[350px] items-center justify-center rounded-xl border border-line bg-surface p-2 shadow-inner">
-                      {previewImgLoading ? (
-                        <div className="p-8 text-xs text-muted">Loading page render…</div>
-                      ) : previewImgUrl ? (
-                        <img
-                          src={previewImgUrl}
-                          alt={`Page ${previewPage}`}
-                          className="max-h-[550px] w-full object-contain rounded-lg border border-line"
-                        />
-                      ) : (
-                        <p className="text-xs text-muted">No preview image available.</p>
+                    <div className="flex items-center gap-1.5">
+                      {previewImgUrl && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewZoom((z) => Math.min(2.5, z + 0.25))}
+                            className="rounded p-1 text-muted hover:bg-surface-hover hover:text-ink transition-colors"
+                            title="Zoom in"
+                          >
+                            <ZoomIn className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewZoom((z) => Math.max(0.75, z - 0.25))}
+                            className="rounded p-1 text-muted hover:bg-surface-hover hover:text-ink transition-colors"
+                            title="Zoom out"
+                          >
+                            <ZoomOut className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewZoom(1)}
+                            className="rounded p-1 text-muted hover:bg-surface-hover hover:text-ink transition-colors"
+                            title="Reset zoom"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </button>
+                          <a
+                            href={previewImgUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[0.7rem] text-accent hover:underline flex items-center gap-1 ml-1"
+                          >
+                            <span>Open</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </>
                       )}
                     </div>
                   </div>
-                )}
+
+                  <div className="flex min-h-[380px] max-h-[600px] items-center justify-center rounded-xl border border-line bg-page p-3 shadow-inner overflow-auto">
+                    {previewImgLoading ? (
+                      <div className="flex flex-col items-center gap-2 p-8 text-xs text-muted">
+                        <RefreshCw className="h-5 w-5 animate-spin text-accent" />
+                        <span>Rendering optical page scan…</span>
+                      </div>
+                    ) : previewImgUrl ? (
+                      <img
+                        src={previewImgUrl}
+                        alt={`Page ${previewPage} of ${selectedDoc.title}`}
+                        style={{
+                          transform: `scale(${previewZoom})`,
+                          transformOrigin: "top center",
+                          transition: "transform 0.15s ease-out",
+                        }}
+                        className="max-h-[540px] w-full object-contain rounded-lg border border-line shadow-xs"
+                      />
+                    ) : (
+                      <div className="p-8 text-center text-xs text-muted space-y-2">
+                        <FileText className="h-8 w-8 mx-auto text-muted/60" />
+                        <p className="font-semibold text-ink">Page Preview Unavailable</p>
+                        <p>The system is generating an optical snapshot for this document.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 

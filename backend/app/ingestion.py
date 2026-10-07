@@ -8,7 +8,7 @@ import openpyxl
 import pymupdf
 from sqlalchemy import select
 
-from app import ai, audit
+from app import ai, audit, page_renderer
 from app.config import settings
 from app.db import SessionLocal
 from app.models import Chunk, Document, IngestionJob, now
@@ -141,11 +141,13 @@ def _extract_image(doc: Document, path: Path) -> tuple[list[tuple[int, str, str]
     return ([(1, "image", text)], 0) if text else ([], 1)
 
 
-def _extract_xlsx(path: Path) -> tuple[list[tuple[int, str, str]], int]:
+def _extract_xlsx(doc: Document, path: Path) -> tuple[list[tuple[int, str, str]], int]:
     """Each row becomes 'Header: value; ...' so a cell never loses its column name."""
     sections = []
     book = openpyxl.load_workbook(io.BytesIO(path.read_bytes()), data_only=True, read_only=True)
     for index, sheet in enumerate(book.worksheets, start=1):
+        # Render visual sheet preview image
+        page_renderer.render_document_page(doc, index, path, page_image_path(doc, index))
         rows = [r for r in sheet.iter_rows(values_only=True) if any(c is not None for c in r)]
         if not rows:
             continue
@@ -201,9 +203,11 @@ def process_document(document_id: str) -> None:
             elif doc.kind == "image":
                 sections, unread = _extract_image(doc, path)
             elif doc.kind == "xlsx":
-                sections, unread = _extract_xlsx(path)
+                sections, unread = _extract_xlsx(doc, path)
             else:
-                sections, unread = [(1, "text", path.read_text("utf-8"))], 0
+                text_content = path.read_text("utf-8", errors="replace")
+                sections, unread = [(1, "text", text_content)], 0
+                page_renderer.render_document_page(doc, 1, path, page_image_path(doc, 1))
 
             create_or_update_job(db, doc, status="processing", stage="sanitization")
             pieces, removed = [], 0
@@ -227,7 +231,7 @@ def process_document(document_id: str) -> None:
                         embedding=vector,
                     )
                 )
-            doc.page_count = max([s[0] for s in sections], default=0) + 0
+            doc.page_count = max(1, max([s[0] for s in sections], default=1))
             doc.flagged = removed > 0
             notes = []
             if unread:
