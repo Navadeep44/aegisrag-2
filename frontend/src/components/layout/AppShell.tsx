@@ -272,10 +272,10 @@ export function AppShell() {
                           <NavLink
                             to={`/app/${item.path}`}
                             className={({ isActive }) =>
-                              `group relative flex items-center justify-between rounded-lg px-3 py-2 text-xs sm:text-sm transition-colors duration-150 ${
+                              `group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs sm:text-sm transition-all duration-150 ${
                                 isActive
-                                  ? "font-medium text-ink bg-surface-subtle shadow-xs"
-                                  : "text-muted hover:bg-surface-hover/70 hover:text-ink"
+                                  ? "font-semibold text-indigo-700 bg-indigo-50/80 shadow-2xs"
+                                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                               }`
                             }
                           >
@@ -285,7 +285,7 @@ export function AppShell() {
                                 {isActive && (
                                   <motion.span
                                     layoutId="sidebar-active-indicator"
-                                    className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-md bg-ink"
+                                    className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-md bg-indigo-600"
                                     transition={{ type: "spring", stiffness: 450, damping: 35 }}
                                   />
                                 )}
@@ -293,7 +293,7 @@ export function AppShell() {
                                 <div className="flex items-center gap-3 min-w-0">
                                   <Icon
                                     className={`h-4.5 w-4.5 shrink-0 transition-colors ${
-                                      isActive ? "text-ink" : "text-muted group-hover:text-ink"
+                                      isActive ? "text-indigo-600" : "text-slate-400 group-hover:text-slate-700"
                                     }`}
                                   />
                                   <span className="truncate">{item.label}</span>

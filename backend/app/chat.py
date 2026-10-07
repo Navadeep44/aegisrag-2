@@ -104,6 +104,7 @@ def answer_question(
          "title": by_id[cid].document.title, "page": by_id[cid].chunk.page,
          "location": by_id[cid].chunk.location, "kind": by_id[cid].document.kind,
          "classification": by_id[cid].document.classification,
+         "section_heading": by_id[cid].chunk.section_heading or "",
          "snippet": by_id[cid].chunk.text[:400]}
         for cid in valid
     ] if answered else []

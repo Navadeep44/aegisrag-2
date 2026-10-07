@@ -120,7 +120,9 @@ def split_text(text: str, max_chars: int = 900) -> list[str]:
 
 
 def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, str]], list[dict], int]:
-    """Extracts pages, detect precise section headings from outlines/bookmarks and font metrics."""
+    """Extracts pages, detect precise section headings from outlines/bookmarks and typography font metrics."""
+    from collections import Counter
+
     sections, sections_meta, unread = [], [], 0
     with pymupdf.open(path) as pdf:
         # Check PDF outline / table of contents
@@ -133,69 +135,125 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                     if title:
                         toc_by_page.setdefault(pnum, []).append((lvl, title))
 
-        current_heading = "Overview"
-        current_level = 1
+        # Pass 1: Compute dominant body font size across the document
+        font_counts: Counter[float] = Counter()
+        for page in pdf:
+            d = page.get_text("dict")
+            for b in d.get("blocks", []):
+                if "lines" in b:
+                    for l in b["lines"]:
+                        for s in l["spans"]:
+                            t = s["text"].strip()
+                            if t:
+                                font_counts[round(s["size"], 1)] += len(t)
+        body_size = font_counts.most_common(1)[0][0] if font_counts else 10.0
+
+        current_heading = doc.title or "Overview"
         sec_counter = 1
 
         for number, page in enumerate(pdf, start=1):
             png = page.get_pixmap(dpi=110).tobytes("png")
             page_image_path(doc, number).write_bytes(png)
-            text = page.get_text().strip()
-
-            # Handle headings from TOC on this page
-            if number in toc_by_page:
-                for lvl, title in toc_by_page[number]:
-                    current_heading = title
-                    current_level = lvl
-                    sections_meta.append({
-                        "id": f"sec_{sec_counter}",
-                        "heading": current_heading,
-                        "level": current_level,
-                        "page": number,
-                        "snippet": f"Page {number} • {current_heading}",
-                        "allowed_roles": [],
-                    })
-                    sec_counter += 1
-
-            # Font-based structural heading detection fallback
-            if number not in toc_by_page and text:
-                blocks = page.get_text("blocks")
-                for b in blocks:
-                    b_text = b[4].strip()
-                    lines = [l.strip() for l in b_text.splitlines() if l.strip()]
-                    if lines:
-                        first_line = lines[0]
-                        looks_like_heading = bool(
-                            re.match(r"^(Chapter|Section|Article|Part|\d+(\.\d+)*)\b", first_line, re.IGNORECASE)
-                            or (first_line.isupper() and 3 < len(first_line) < 60)
-                            or (len(first_line) <= 60 and first_line == first_line.title() and not first_line.endswith((".", ",", ";", ":")))
-                        )
-                        if looks_like_heading and 4 <= len(first_line) <= 75:
-                            if not any(s["heading"].lower() == first_line.lower() for s in sections_meta):
-                                current_heading = first_line
-                                current_level = 1 if re.match(r"^\d+\b", first_line) else 2
-                                snippet = " ".join(lines[1:])[:150] if len(lines) > 1 else first_line
-                                sections_meta.append({
-                                    "id": f"sec_{sec_counter}",
-                                    "heading": current_heading,
-                                    "level": current_level,
-                                    "page": number,
-                                    "snippet": snippet,
-                                    "allowed_roles": [],
-                                })
-                                sec_counter += 1
-                                break
+            raw_page_text = page.get_text().strip()
 
             has_visuals = bool(page.get_images()) or len(page.get_drawings()) > 8
-            if len(text) < 40 or has_visuals:
+            visual_desc = ""
+            if len(raw_page_text) < 40 or has_visuals:
                 seen = ai.describe_image(png).strip()
                 if seen:
-                    text = seen if len(text) < 40 else f"{text}\n\n[Visual content]\n{seen}"
+                    visual_desc = seen
 
-            if not text:
+            if not raw_page_text and not visual_desc:
                 unread += 1
                 continue
-            sections.append((number, f"page {number}", text, current_heading))
+
+            d = page.get_text("dict")
+            text_blocks = [b for b in d.get("blocks", []) if "lines" in b]
+            page_toc = toc_by_page.get(number, [])
+            current_section_buf: list[str] = []
+
+            for b in text_blocks:
+                lines: list[str] = []
+                max_size = 0.0
+                is_bold = False
+                for l in b["lines"]:
+                    line_str = "".join(s["text"] for s in l["spans"]).strip()
+                    if line_str:
+                        lines.append(line_str)
+                    for s in l["spans"]:
+                        if s["text"].strip():
+                            sz = round(s["size"], 1)
+                            if sz > max_size:
+                                max_size = sz
+                            flags = s.get("flags", 0)
+                            font_name = s.get("font", "").lower()
+                            if (flags & 2) or ("bold" in font_name) or ("black" in font_name) or ("heavy" in font_name):
+                                is_bold = True
+
+                if not lines:
+                    continue
+
+                first_line = lines[0]
+                full_block = "\n".join(lines).strip()
+
+                # Running header/footer filtering
+                bbox = b.get("bbox", (0, 0, 0, 0))
+                is_page_number = bool(re.match(r"^\s*(page\s+\d+(\s+of\s+\d+)?|\d+)\s*$", first_line, re.IGNORECASE))
+                if is_page_number:
+                    continue
+                is_margin = bbox[1] < 45 or bbox[3] > (page.rect.height - 45)
+                is_header_footer_heading = is_margin and max_size <= (body_size * 1.05)
+
+                # Heading candidate criteria
+                is_toc_heading = any(t[1].lower() in first_line.lower() or first_line.lower() in t[1].lower() for t in page_toc)
+                is_larger = max_size >= (body_size * 1.15)
+                is_bold_title = is_bold and len(first_line) < 120 and not first_line.endswith((".", ",", ";", ":")) and max_size >= body_size
+                is_numbered = bool(re.match(r"^(\d+(\.\d+)*|[A-Z]\.|\b(Chapter|Section|Article|Part)\s+\d+)\b", first_line, re.IGNORECASE)) and len(first_line) < 120
+                is_all_caps = first_line.isupper() and 4 < len(first_line) < 80 and not first_line.endswith((".", ",", ";", ":")) and max_size >= body_size
+
+                looks_heading = is_toc_heading or (
+                    not is_header_footer_heading
+                    and (is_larger or is_bold_title or is_numbered or is_all_caps)
+                    and (len(lines) == 1 or len(first_line) < 100)
+                )
+
+                if looks_heading and len(first_line) < 130:
+                    heading_candidate = first_line
+                    # Finalize text buffer for the previous section on this page
+                    if current_section_buf:
+                        buf_text = "\n\n".join(current_section_buf).strip()
+                        if buf_text:
+                            sections.append((number, f"page {number}", buf_text, current_heading))
+                        current_section_buf = []
+
+                    current_heading = heading_candidate
+                    level = 1 if max_size >= (body_size * 1.3) or is_numbered else 2
+                    if not any(s["heading"].lower() == current_heading.lower() for s in sections_meta):
+                        sections_meta.append({
+                            "id": f"sec_{sec_counter}",
+                            "heading": current_heading,
+                            "level": level,
+                            "page": number,
+                            "snippet": full_block[:150],
+                            "allowed_roles": [],
+                        })
+                        sec_counter += 1
+
+                    if len(lines) > 1:
+                        current_section_buf.append("\n".join(lines[1:]))
+                else:
+                    current_section_buf.append(full_block)
+
+            # Append any remaining text buffer on this page
+            if current_section_buf:
+                buf_text = "\n\n".join(current_section_buf).strip()
+                if buf_text:
+                    sections.append((number, f"page {number}", buf_text, current_heading))
+
+            # If there was visual OCR content on this page
+            if visual_desc:
+                vis_content = f"[Visual Content on Page {number}]\n{visual_desc}"
+                sections.append((number, f"page {number}", vis_content, current_heading))
 
     if not sections_meta and sections:
         sections_meta.append({

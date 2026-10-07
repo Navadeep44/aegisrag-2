@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Copy, Check, FileText, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react";
 import type { Citation, Message } from "../../lib/types";
 import { LEVELS } from "../../lib/types";
+import { StructuredAnswer } from "./StructuredAnswer";
 
 interface MessageBubbleProps {
   message: Message;
@@ -75,9 +76,17 @@ export function MessageBubble({
         )}
 
         {/* Message Content */}
-        <div className="text-sm sm:text-[0.95rem] text-ink leading-relaxed whitespace-pre-wrap">
-          {message.content}
-        </div>
+        {answered ? (
+          <StructuredAnswer
+            content={message.content}
+            citations={message.citations}
+            onSelectCitation={onSelect}
+          />
+        ) : (
+          <div className="text-sm sm:text-[0.95rem] text-slate-800 leading-relaxed whitespace-pre-wrap">
+            {message.content}
+          </div>
+        )}
 
         {/* Suggested Resource Card (When Abstaining) */}
         {!answered && message.suggested_resource && (
@@ -131,8 +140,8 @@ export function MessageBubble({
         )}
       </div>
 
-      {/* Verified Citations Badges */}
-      {message.citations.length > 0 && (
+      {/* Verified Citations Badges for non-answered/system notices */}
+      {!answered && message.citations.length > 0 && (
         <div className="space-y-2 pt-1 pl-1">
           <p className="text-[0.65rem] font-bold uppercase tracking-wider text-muted font-mono">
             Sources — click to inspect exact page scan:

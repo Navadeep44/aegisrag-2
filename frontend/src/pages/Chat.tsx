@@ -251,31 +251,31 @@ export default function Chat() {
 
       {/* 2. Chat Stream / Messages Area */}
       <div className="min-h-0 flex-1 overflow-y-auto py-6 space-y-6">
-        {/* Empty State: Focused & Minimalist */}
+        {/* Empty State: Focused & Minimalist Cards */}
         {!hasMessages && (
-          <div className="mx-auto flex max-w-xl flex-col items-center justify-center pt-12 sm:pt-20 text-center space-y-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface border border-line text-accent shadow-xs">
-              <Sparkles className="h-6 w-6" />
+          <div className="mx-auto flex max-w-xl flex-col items-center justify-center pt-8 sm:pt-16 text-center space-y-6">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 shadow-xs">
+              <Sparkles className="h-7 w-7" />
             </div>
             <div className="space-y-1.5">
-              <h2 className="text-2xl sm:text-3xl font-bold text-ink tracking-tight">
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
                 How can I help you today?
               </h2>
-              <p className="text-xs sm:text-sm text-muted">
-                Ask any question grounded in your authorized organization documents.
+              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
+                Ask questions grounded directly in your authorized organizational documents.
               </p>
             </div>
 
-            {/* Prompt Starter Chips */}
-            <div className="w-full flex flex-col gap-2 pt-2 text-left">
+            {/* Prompt Starter Cards */}
+            <div className="w-full flex flex-col gap-2.5 pt-1 text-left">
               {promptList.slice(0, 3).map((q) => (
                 <button
                   key={q}
                   onClick={() => ask(q)}
-                  className="rounded-xl border border-line bg-surface px-4 py-3 text-xs text-ink/90 transition-all hover:border-ink hover:text-ink hover:shadow-xs flex items-center justify-between group"
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-xs text-slate-800 transition-all hover:border-indigo-400 hover:shadow-xs hover:bg-indigo-50/20 flex items-center justify-between group cursor-pointer"
                 >
-                  <span className="font-medium leading-relaxed truncate">{q}</span>
-                  <span className="text-muted text-[0.7rem] group-hover:text-accent font-medium shrink-0 ml-2">Ask →</span>
+                  <span className="font-semibold text-slate-900 group-hover:text-indigo-950 truncate">{q}</span>
+                  <span className="text-indigo-600 text-xs font-semibold shrink-0 ml-2 group-hover:translate-x-0.5 transition-transform">Ask →</span>
                 </button>
               ))}
             </div>
@@ -296,9 +296,9 @@ export default function Chat() {
             ))}
 
             {busy && (
-              <div className="flex items-center gap-2.5 text-xs text-muted font-mono" aria-live="polite">
-                <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
-                <span>Checking permissions and searching authorized documents…</span>
+              <div className="flex items-center gap-2.5 text-xs text-indigo-600 font-medium py-2" aria-live="polite">
+                <span className="h-2 w-2 rounded-full bg-indigo-600 animate-ping" />
+                <span>Searching authorized documents & checking permissions…</span>
               </div>
             )}
           </div>
@@ -308,22 +308,22 @@ export default function Chat() {
       </div>
 
       {/* 3. Bottom Chat Input Bar */}
-      <div className="border-t border-line pt-3">
+      <div className="border-t border-slate-200 pt-3">
         <form
           onSubmit={(e) => {
             e.preventDefault();
             ask(question);
           }}
-          className="mx-auto max-w-3xl flex items-center gap-2 rounded-2xl border border-line bg-surface p-1.5 shadow-sm focus-within:border-ink focus-within:ring-1 focus-within:ring-ink"
+          className="mx-auto max-w-3xl flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-xs focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all"
         >
           <input
             ref={inputRef}
             type="text"
-            className="flex-1 bg-transparent px-4 py-2.5 text-sm text-ink placeholder:text-muted focus:outline-none"
+            className="flex-1 bg-transparent px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
             placeholder={
               shortSummary
-                ? "Ask for a short executive summary across authorized documents..."
-                : "Ask a question about authorized enterprise documents..."
+                ? "Ask for an executive summary across authorized documents..."
+                : "Ask a question about your enterprise documents..."
             }
             aria-label="Your Question"
             value={question}
@@ -336,8 +336,8 @@ export default function Chat() {
             disabled={busy || !question.trim()}
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all ${
               question.trim() && !busy
-                ? "bg-ink text-white hover:bg-ink/90 shadow-xs cursor-pointer"
-                : "bg-surface-subtle text-muted cursor-not-allowed"
+                ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs cursor-pointer"
+                : "bg-slate-100 text-slate-400 cursor-not-allowed"
             }`}
             aria-label="Send question"
           >

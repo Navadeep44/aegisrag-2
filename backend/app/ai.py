@@ -17,8 +17,20 @@ from app.config import settings
 STOP = set(
     "a an and are as at be by did do does for from has have how i in is it its of on or our "
     "that the their there this to was we were what when where which who why will with you your "
-    "many much can could should would me my us they them".split()
+    "many much can could should would me my us they them tell about give show detail details "
+    "information regarding describe explain please know find want like get got let".split()
 )
+
+SYNONYMS = {
+    "apply": ["request", "submit", "portal", "process", "application", "submission"],
+    "rule": ["policy", "guideline", "directive", "standard", "procedure", "control"],
+    "policy": ["rule", "guideline", "directive", "standard", "procedure", "regulation"],
+    "vacation": ["leave", "pto", "holiday", "absence", "timeoff"],
+    "leave": ["vacation", "pto", "holiday", "absence", "timeoff", "annual", "sick"],
+    "revenue": ["earnings", "sales", "financial", "income", "q1", "q2", "q3", "q4", "forecast"],
+    "service": ["services", "component", "architecture", "system", "platform"],
+    "password": ["credential", "authentication", "login", "passwords"],
+}
 
 SYSTEM_PROMPT = """You answer questions for employees using only the evidence provided.
 Rules:
@@ -28,14 +40,21 @@ Rules:
 Reply with JSON only: {"answerable": true|false, "answer": "...", "citations": [ids]}"""
 
 
+def stem(w: str) -> str:
+    w = w.lower().strip()
+    for s in ["ing", "tion", "ment", "ies", "es", "ed", "al", "s"]:
+        if len(w) > 3 and w.endswith(s):
+            return w[:-len(s)]
+    return w
+
+
 def tokens(text: str) -> list[str]:
     out = []
     for t in re.findall(r"[a-z0-9]+", text.lower()):
-        if t in STOP:
+        st = stem(t)
+        if st in STOP or t in STOP:
             continue
-        if len(t) > 3 and t.endswith("s"):
-            t = t[:-1]
-        out.append(t)
+        out.append(st)
     return out
 
 
@@ -64,7 +83,7 @@ def _sentences(text: str) -> list[str]:
             continue
         current = f"{current} {line}".strip()
         if current[-1] in ".!?" or len(line) < 60:
-            units.extend(re.split(r"(?<=[.!?])\s+", current))
+            units.extend([s.strip() for s in re.split(r"(?<=[.!?])\s+", current) if s.strip()])
             current = ""
     if current:
         units.append(current)
@@ -72,16 +91,82 @@ def _sentences(text: str) -> list[str]:
 
 
 def _local_answer(question: str, evidence: list[dict]) -> dict:
-    q = set(tokens(question))
-    best = (0.0, None, "")
-    for ev in evidence:
-        for sentence in _sentences(ev["text"]):
-            score = len(q & set(tokens(sentence))) / max(len(q), 1)
-            if score > best[0]:
-                best = (score, ev["id"], sentence)
-    if best[0] < 0.6:
+    q_tokens = tokens(question)
+    if not q_tokens:
         return {"answerable": False, "answer": "", "citations": []}
-    return {"answerable": True, "answer": best[2][:600], "citations": [best[1]]}
+
+    q_set = set(q_tokens)
+    best_candidate = None
+    best_overall_score = 0.0
+
+    for ev in evidence:
+        cid = ev["id"]
+        title = ev.get("title", "")
+        chunk_text = ev.get("text", "")
+
+        chunk_tokens = set(tokens(chunk_text + " " + title))
+        concept_coverage = sum(
+            1 for t in q_set
+            if (t in chunk_tokens or any(stem(syn) in chunk_tokens for syn in SYNONYMS.get(t, [])))
+        ) / max(len(q_set), 1)
+
+        sentences = _sentences(chunk_text)
+        scored_sents = []
+        for s in sentences:
+            if "ignore all previous" in s.lower():
+                continue
+            st = set(tokens(s))
+            if not st:
+                continue
+            ol = sum(
+                1 for t in q_set
+                if (t in st or any(stem(syn) in st for syn in SYNONYMS.get(t, [])))
+            )
+            sc = ol / max(len(q_set), 1)
+            if ol > 0:
+                scored_sents.append((sc, ol, s))
+
+        if not scored_sents:
+            continue
+
+        scored_sents.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        top_sc, top_ol, top_s = scored_sents[0]
+
+        is_chunk_valid = top_sc >= 0.58 or (concept_coverage >= 0.75 and top_sc >= 0.33)
+        if is_chunk_valid and top_sc > best_overall_score:
+            best_overall_score = top_sc
+            # Prefer descriptive sentences over bare titles for primary answer
+            descriptive = [s for sc, ol, s in scored_sents if len(s) > 35 and title.lower() not in s.lower()]
+            primary = descriptive[0] if descriptive else top_s
+            supporting = [
+                s for sc, ol, s in scored_sents
+                if s != primary and len(s) > 25 and not (len(s) < 35 and title.lower() in s.lower())
+            ][:3]
+
+            best_candidate = {
+                "cid": cid,
+                "title": title,
+                "primary": primary,
+                "supporting": supporting,
+            }
+
+    if not best_candidate:
+        return {"answerable": False, "answer": "", "citations": []}
+
+    primary = best_candidate["primary"]
+    supporting = best_candidate["supporting"]
+    lines = [f"**Direct Answer**\n{primary}"]
+    if supporting:
+        lines.append("\n**Key Policy Guidelines & Details**")
+        for s in supporting:
+            clean_s = s.rstrip(".") + "."
+            lines.append(f"- {clean_s}")
+
+    return {
+        "answerable": True,
+        "answer": "\n".join(lines),
+        "citations": [best_candidate["cid"]],
+    }
 
 
 # ---------- OpenAI-compatible provider ----------

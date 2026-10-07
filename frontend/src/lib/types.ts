@@ -114,6 +114,7 @@ export type Citation = {
   location: string;
   kind: string;
   classification: number;
+  section_heading?: string;
   snippet: string;
 };
 
