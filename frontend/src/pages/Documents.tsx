@@ -1,19 +1,44 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { Button } from "../components/ui/Button";
-import { Banded, Level } from "../components/ui/Classification";
-import { inputClass, smallSelectClass } from "../components/ui/field";
-import { Notice } from "../components/ui/Notice";
+import {
+  Upload,
+  Search,
+  FileText,
+  Shield,
+  Eye,
+  RefreshCw,
+  Trash2,
+  AlertTriangle,
+  FileCheck,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  MoreVertical,
+  UserPlus,
+  Layers,
+} from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
-import { useAuth } from "../context/AuthContext";
+import { Button } from "../components/ui/Button";
+import { StatCard } from "../components/ui/StatCard";
+import { StatCardSkeleton, TableSkeleton } from "../components/ui/Skeleton";
+import { Notice } from "../components/ui/Notice";
+import { Drawer } from "../components/ui/Drawer";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { ClearancePill, StatusPill } from "../components/ui/StatusPill";
 import { AccessEditor } from "../features/documents/AccessEditor";
 import { UploadForm } from "../features/documents/UploadForm";
+import { useAuth } from "../context/AuthContext";
+import { useToast } from "../components/ui/Toast";
 import { api, imageUrl, post } from "../lib/api";
 import type { Department, Doc, DocStatus, FlaggedDoc, Grant, Role, User } from "../lib/types";
 import { hasPermission } from "../lib/types";
 
 export default function Documents() {
   const { user } = useAuth();
+  const { showToast } = useToast();
+
   const [docs, setDocs] = useState<Doc[] | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -21,42 +46,63 @@ export default function Documents() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  // Preview modal
-  const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
+  // Search & Filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilterTab, setActiveFilterTab] = useState<string>("all");
+
+  // Drawers & Modals
+  const [uploadDrawerOpen, setUploadDrawerOpen] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<Doc | null>(null);
+  const [docDrawerTab, setDocDrawerTab] = useState<"access" | "pages" | "processing" | "danger">("access");
+
+  // Preview state inside drawer
   const [previewPage, setPreviewPage] = useState(1);
   const [previewImgUrl, setPreviewImgUrl] = useState<string | null>(null);
+  const [previewImgLoading, setPreviewImgLoading] = useState(false);
 
-  // Ingestion job status modal
+  // Ingestion job status
   const [jobStatus, setJobStatus] = useState<DocStatus | null>(null);
+  const [jobLoading, setJobLoading] = useState(false);
 
-  // Flagged Quarantine Drawer / Modal
+  // Flagged Quarantine Drawer
   const [flaggedDocs, setFlaggedDocs] = useState<FlaggedDoc[]>([]);
   const [reviewingFlagged, setReviewingFlagged] = useState<FlaggedDoc | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [reviewBusy, setReviewBusy] = useState(false);
 
-  // Delegated Request Modal (for Team Leads, Dept Managers & Admins)
+  // Delegated Access Request Modal
   const [delegatingDoc, setDelegatingDoc] = useState<Doc | null>(null);
   const [delegateTargetUser, setDelegateTargetUser] = useState<string>("");
   const [delegateReason, setDelegateReason] = useState<string>("");
   const [delegateSubmitting, setDelegateSubmitting] = useState(false);
 
+  // Delete Confirmation Dialog
+  const [deletingDoc, setDeletingDoc] = useState<Doc | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
   const canUpload = hasPermission(user, "document.upload");
   const canManageGrants = hasPermission(user, "document.grant.manage");
   const canDelete = hasPermission(user, "document.delete");
   const canManage = canUpload || canManageGrants;
-  const isDocManager = user?.roles?.includes("document_manager") || user?.roles?.includes("admin") || user?.is_admin;
-  const isDeptLead = user?.roles?.includes("department_manager") || user?.roles?.includes("team_lead") || isDocManager;
+  const isDocManager =
+    user?.roles?.includes("document_manager") ||
+    user?.roles?.includes("admin") ||
+    user?.is_admin;
+  const isDeptLead =
+    user?.roles?.includes("department_manager") ||
+    user?.roles?.includes("team_lead") ||
+    isDocManager;
   const isHr = user?.roles?.includes("hr");
   const isAuditor = user?.roles?.includes("security_auditor");
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeFilterTab, setActiveFilterTab] = useState<string>("all");
-
   const load = () => {
-    api<Doc[]>("/documents").then(setDocs).catch((e) => setError(e.message));
+    api<Doc[]>("/documents")
+      .then(setDocs)
+      .catch((e) => setError((e as Error).message));
     if (isDocManager) {
-      api<FlaggedDoc[]>("/documents/flagged").then(setFlaggedDocs).catch(() => {});
+      api<FlaggedDoc[]>("/documents/flagged")
+        .then(setFlaggedDocs)
+        .catch(() => {});
     }
   };
 
@@ -69,23 +115,45 @@ export default function Documents() {
     }
   }, [canManage, isDeptLead]);
 
-  // Keep polling while something is still being processed.
+  // Polling when background processing
   useEffect(() => {
     if (!docs?.some((d) => d.status === "processing")) return;
-    const timer = setTimeout(load, 2000);
+    const timer = setTimeout(load, 2500);
     return () => clearTimeout(timer);
   }, [docs]);
 
+  // Load preview image when selectedDoc or previewPage changes
   useEffect(() => {
-    if (!previewDoc) {
+    if (!selectedDoc || selectedDoc.page_count === 0) {
       setPreviewImgUrl(null);
       return;
     }
-    imageUrl(`/documents/${previewDoc.id}/pages/${previewPage}`).then(setPreviewImgUrl);
-  }, [previewDoc, previewPage]);
+    setPreviewImgLoading(true);
+    let cancelled = false;
+    imageUrl(`/documents/${selectedDoc.id}/pages/${previewPage}`)
+      .then((u) => {
+        if (!cancelled) setPreviewImgUrl(u);
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewImgLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDoc, previewPage]);
+
+  // Load job status when opening processing tab
+  useEffect(() => {
+    if (selectedDoc && docDrawerTab === "processing") {
+      setJobLoading(true);
+      api<DocStatus>(`/documents/${selectedDoc.id}/status`)
+        .then(setJobStatus)
+        .catch(() => {})
+        .finally(() => setJobLoading(false));
+    }
+  }, [selectedDoc, docDrawerTab]);
 
   async function saveAccess(doc: Doc, grants: Grant[], classification = doc.classification) {
-    setError(""); setNotice("");
     try {
       await api(`/documents/${doc.id}/access`, {
         method: "PATCH",
@@ -98,59 +166,60 @@ export default function Documents() {
           })),
         }),
       });
-      setNotice(`Access grants updated for "${doc.title}".`);
+      showToast(`Access rules updated for "${doc.title}".`, "success");
       await load();
+      // Update active drawer document object
+      const refreshed = (await api<Doc[]>("/documents")).find((d) => d.id === doc.id);
+      if (refreshed) setSelectedDoc(refreshed);
     } catch (e) {
-      setError((e as Error).message);
+      showToast((e as Error).message, "error");
     }
   }
 
-  async function remove(doc: Doc) {
-    if (!window.confirm(`Delete "${doc.title}"? This removes the file and everything indexed from it.`)) return;
+  async function confirmDelete() {
+    if (!deletingDoc) return;
+    setDeleteBusy(true);
     try {
-      await api(`/documents/${doc.id}`, { method: "DELETE" });
-      setNotice(`Document "${doc.title}" purged from catalog.`);
+      await api(`/documents/${deletingDoc.id}`, { method: "DELETE" });
+      showToast(`"${deletingDoc.title}" removed from catalog.`, "success");
+      setDeletingDoc(null);
+      if (selectedDoc?.id === deletingDoc.id) setSelectedDoc(null);
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      showToast((e as Error).message, "error");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
-  async function reprocess(doc: Doc) {
-    setError(""); setNotice("");
+  async function reprocessDoc(doc: Doc) {
     try {
       await post(`/documents/${doc.id}/reprocess`, {});
-      setNotice(`Reprocessing started for "${doc.title}".`);
+      showToast(`Reprocessing started for "${doc.title}".`, "info");
       await load();
     } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  async function inspectJob(doc: Doc) {
-    try {
-      const status = await api<DocStatus>(`/documents/${doc.id}/status`);
-      setJobStatus(status);
-    } catch (e) {
-      setError((e as Error).message);
+      showToast((e as Error).message, "error");
     }
   }
 
   async function handleFlaggedDecision(docId: string, decision: "approve" | "purge") {
     setReviewBusy(true);
-    setError("");
-    setNotice("");
     try {
       await post(`/documents/${docId}/review-flagged`, {
         decision,
         note: reviewNote.trim() || undefined,
       });
-      setNotice(decision === "approve" ? "Document approved and activated." : "Flagged document purged.");
+      showToast(
+        decision === "approve"
+          ? "Document approved and indexed in knowledge base."
+          : "Quarantined document purged.",
+        "success"
+      );
       setReviewingFlagged(null);
       setReviewNote("");
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      showToast((e as Error).message, "error");
     } finally {
       setReviewBusy(false);
     }
@@ -160,8 +229,6 @@ export default function Documents() {
     e.preventDefault();
     if (!delegatingDoc || !delegateTargetUser || !delegateReason.trim()) return;
     setDelegateSubmitting(true);
-    setError("");
-    setNotice("");
     try {
       await post("/access-requests", {
         resource_type: "document",
@@ -169,16 +236,42 @@ export default function Documents() {
         target_user_id: delegateTargetUser,
         reason: delegateReason.trim(),
       });
-      setNotice(`Delegated access request submitted for teammate.`);
+      showToast("Delegated access request submitted for team member.", "success");
       setDelegatingDoc(null);
       setDelegateTargetUser("");
       setDelegateReason("");
     } catch (err) {
-      setError((err as Error).message);
+      showToast((err as Error).message, "error");
     } finally {
       setDelegateSubmitting(false);
     }
   }
+
+  // Helper to summarize access for table row
+  const getSharedWithSummary = (doc: Doc) => {
+    const grants = doc.access || [];
+    if (grants.some((g) => g.subject_type === "everyone")) return "Everyone";
+
+    const roleGrants = grants.filter((g) => g.subject_type === "role");
+    const deptGrants = grants.filter((g) => g.subject_type === "department");
+    const userGrants = grants.filter((g) => g.subject_type === "user");
+
+    const parts: string[] = [];
+    if (roleGrants.length > 0) {
+      const firstRoleName = roles.find((r) => r.id === roleGrants[0].subject_id)?.name || roleGrants[0].subject_id;
+      parts.push(roleGrants.length > 1 ? `${firstRoleName} +${roleGrants.length - 1}` : `${firstRoleName}`);
+    }
+    if (deptGrants.length > 0) {
+      const deptName = departments.find((d) => d.id === deptGrants[0].subject_id)?.name || deptGrants[0].subject_id;
+      parts.push(`${deptName} Dept`);
+    }
+    if (userGrants.length > 0) {
+      const firstUserName = users.find((u) => u.id === userGrants[0].subject_id)?.name || userGrants[0].label || "1 user";
+      parts.push(userGrants.length > 1 ? `${firstUserName} +${userGrants.length - 1}` : firstUserName);
+    }
+
+    return parts.length > 0 ? parts.join(", ") : "Private (Owner only)";
+  };
 
   const filteredDocs = (docs || []).filter((d) => {
     if (searchQuery.trim()) {
@@ -188,7 +281,6 @@ export default function Documents() {
     if (activeFilterTab === "active") return d.status === "active";
     if (activeFilterTab === "processing") return d.status === "processing";
     if (activeFilterTab === "flagged") return d.flagged || d.status === "flagged";
-    if (activeFilterTab === "hr") return d.classification === 3 || d.title.toLowerCase().includes("leave") || d.title.toLowerCase().includes("salary");
     if (activeFilterTab === "dept") return d.readable;
     return true;
   });
@@ -198,304 +290,528 @@ export default function Documents() {
   const flaggedCount = (docs || []).filter((d) => d.flagged || d.status === "flagged").length;
 
   return (
-    <div className="max-w-5xl space-y-8 pb-12">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <PageHeader title={isDocManager ? "Document Ingestion & Knowledge Hub" : isAuditor ? "Document Catalog Metadata (Audit View)" : "Documents Catalog"}>
-          {isDocManager
-            ? "Manage lifecycle, classification tiers, pre-indexing grants, and multimodal ingestion pipeline jobs. Access changes apply to subsequent queries immediately."
-            : isAuditor
-            ? "Inspect tamper-proof checksums, document classifications, multimodal extraction formats, and indirect prompt injection flags."
-            : "Authorized enterprise documents your questions can draw upon according to your role grants and clearance level."}
-        </PageHeader>
-        {!canManage && (
-          <a href="/app/access-requests" className="text-xs text-accent underline underline-offset-4 hover:opacity-80 font-medium">
-            Request Additional Document Access →
-          </a>
-        )}
-      </div>
+    <div className="space-y-8 pb-16">
+      {/* 1. Page Header with single Upload Action */}
+      <PageHeader
+        title="Documents"
+        subtitle="Searchable enterprise documents matched to your role permissions and security clearance."
+        action={
+          canUpload ? (
+            <Button
+              kind="primary"
+              onClick={() => setUploadDrawerOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <Upload className="h-4 w-4" />
+              <span>Upload document</span>
+            </Button>
+          ) : undefined
+        }
+      />
 
-      {/* Operations metrics banner for Document Managers & Admins */}
-      {isDocManager && docs && (
-        <section className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-          <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-            <p className="text-xs uppercase tracking-wide text-muted font-mono">Total Ingested</p>
-            <p className="display mt-1 text-3xl font-semibold text-ink">{docs.length}</p>
-          </div>
-          <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-            <p className="text-xs uppercase tracking-wide text-muted font-mono">Active in Vector DB</p>
-            <p className="display mt-1 text-3xl font-semibold text-emerald-700">{activeCount}</p>
-          </div>
-          <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-            <p className="text-xs uppercase tracking-wide text-muted font-mono">Processing Queue</p>
-            <p className="display mt-1 text-3xl font-semibold text-sky-700">{processingCount}</p>
-          </div>
-          <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-            <p className="text-xs uppercase tracking-wide text-muted font-mono">Flagged Injections</p>
-            <div className="mt-1 flex items-baseline justify-between">
-              <p className="display text-3xl font-semibold text-amber-700">{flaggedDocs.length || flaggedCount}</p>
-              {flaggedDocs.length > 0 && (
-                <button
-                  onClick={() => setReviewingFlagged(flaggedDocs[0])}
-                  className="text-xs text-amber-700 underline underline-offset-2 font-medium"
-                >
-                  Review Quarantine →
-                </button>
-              )}
-            </div>
-          </div>
+      {error && <Notice tone="error">{error}</Notice>}
+
+      {/* 2. Compact Operational Metrics Strip */}
+      {docs === null ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+        </div>
+      ) : (
+        <section aria-label="Catalog metrics" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            label="Total Documents"
+            value={docs.length}
+            subtext="In organization catalog"
+          />
+          <StatCard
+            label="Ready to Search"
+            value={activeCount}
+            subtext="Active in vector knowledge store"
+            tone="emerald"
+          />
+          <StatCard
+            label="Processing Queue"
+            value={processingCount}
+            subtext="OCR and passage extraction"
+            tone={processingCount > 0 ? "sky" : "default"}
+          />
+          <StatCard
+            label="Flagged for Review"
+            value={flaggedDocs.length || flaggedCount}
+            subtext={
+              flaggedDocs.length > 0
+                ? "Click to review quarantined files"
+                : "Zero security flags detected"
+            }
+            tone={flaggedDocs.length > 0 || flaggedCount > 0 ? "amber" : "default"}
+            onClick={
+              flaggedDocs.length > 0
+                ? () => setReviewingFlagged(flaggedDocs[0])
+                : undefined
+            }
+          />
         </section>
       )}
 
-      {error && <Notice tone="error">{error}</Notice>}
-      {notice && <Notice tone="info">{notice}</Notice>}
-
-      {canUpload && <UploadForm roles={roles} departments={departments} onDone={load} />}
-
-      {/* Filter and Search Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
-        <div className="flex flex-wrap gap-1 text-xs">
-          <button
-            onClick={() => setActiveFilterTab("all")}
-            className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "all" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
-          >
-            All ({docs?.length ?? 0})
-          </button>
-          {isDocManager && (
-            <>
-              <button
-                onClick={() => setActiveFilterTab("active")}
-                className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "active" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
-              >
-                Active ({activeCount})
-              </button>
+      {/* 3. Sticky Filter & Search Toolbar */}
+      <div className="sticky top-0 z-10 -mx-4 sm:-mx-8 lg:-mx-12 px-4 sm:px-8 lg:px-12 py-3 bg-page/95 backdrop-blur-md border-b border-line">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Segmented Filter Pills */}
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            <button
+              onClick={() => setActiveFilterTab("all")}
+              className={`rounded-full px-3 py-1.5 transition-colors ${
+                activeFilterTab === "all"
+                  ? "bg-ink font-medium text-white shadow-xs"
+                  : "border border-line bg-surface text-muted hover:text-ink"
+              }`}
+            >
+              All ({docs?.length ?? 0})
+            </button>
+            <button
+              onClick={() => setActiveFilterTab("active")}
+              className={`rounded-full px-3 py-1.5 transition-colors ${
+                activeFilterTab === "active"
+                  ? "bg-ink font-medium text-white shadow-xs"
+                  : "border border-line bg-surface text-muted hover:text-ink"
+              }`}
+            >
+              Active ({activeCount})
+            </button>
+            {processingCount > 0 && (
               <button
                 onClick={() => setActiveFilterTab("processing")}
-                className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "processing" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
+                className={`rounded-full px-3 py-1.5 transition-colors ${
+                  activeFilterTab === "processing"
+                    ? "bg-sky-700 font-medium text-white shadow-xs"
+                    : "border border-line bg-surface text-muted hover:text-sky-700"
+                }`}
               >
                 Processing ({processingCount})
               </button>
+            )}
+            {(flaggedDocs.length > 0 || flaggedCount > 0) && (
               <button
                 onClick={() => setActiveFilterTab("flagged")}
-                className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "flagged" ? "bg-amber-700 font-medium text-white" : "border border-line bg-surface text-muted hover:text-amber-700"}`}
+                className={`rounded-full px-3 py-1.5 transition-colors ${
+                  activeFilterTab === "flagged"
+                    ? "bg-amber-700 font-medium text-white shadow-xs"
+                    : "border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                }`}
               >
-                Flagged Injections ({flaggedDocs.length || flaggedCount})
+                Flagged ({flaggedDocs.length || flaggedCount})
               </button>
-            </>
-          )}
-          {isHr && (
-            <button
-              onClick={() => setActiveFilterTab("hr")}
-              className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "hr" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
-            >
-              HR & Policies
-            </button>
-          )}
-          {isDeptLead && (
-            <button
-              onClick={() => setActiveFilterTab("dept")}
-              className={`rounded-full px-3 py-1 transition-colors ${activeFilterTab === "dept" ? "bg-ink font-medium text-white" : "border border-line bg-surface text-muted hover:text-ink"}`}
-            >
-              My Department
-            </button>
-          )}
-        </div>
+            )}
+            {isDeptLead && (
+              <button
+                onClick={() => setActiveFilterTab("dept")}
+                className={`rounded-full px-3 py-1.5 transition-colors ${
+                  activeFilterTab === "dept"
+                    ? "bg-ink font-medium text-white shadow-xs"
+                    : "border border-line bg-surface text-muted hover:text-ink"
+                }`}
+              >
+                My Department
+              </button>
+            )}
+          </div>
 
-        <div className="w-full sm:w-64">
-          <input
-            type="text"
-            placeholder="Filter documents by title…"
-            className="w-full rounded-md border border-line bg-surface px-3 py-1 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+          {/* Search input */}
+          <div className="w-full sm:w-64">
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted" />
+              <input
+                type="text"
+                placeholder="Filter documents…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full rounded-lg border border-line bg-surface pl-8 pr-3 py-1.5 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* 4. Compact Document List Table */}
       {docs === null ? (
-        <p className="text-sm text-muted">Loading catalog…</p>
+        <TableSkeleton rows={6} />
       ) : filteredDocs.length === 0 ? (
-        <Notice tone="info">
-          {searchQuery ? "No documents match your search query." : canManage ? "No documents match the selected filter." : "No documents have been authorized for your profile."}
-        </Notice>
+        <div className="rounded-xl border border-line bg-surface p-12 text-center space-y-3">
+          <FileText className="mx-auto h-8 w-8 text-muted" />
+          <h3 className="display text-xl font-semibold text-ink">No documents found</h3>
+          <p className="text-xs text-muted max-w-sm mx-auto">
+            {searchQuery
+              ? "No documents match your search query."
+              : "No documents match the selected filter."}
+          </p>
+          {canUpload && (
+            <Button onClick={() => setUploadDrawerOpen(true)} kind="primary" className="mt-2">
+              Upload first document
+            </Button>
+          )}
+        </div>
       ) : (
-        <ul className="space-y-4">
-          <AnimatePresence initial={false}>
-            {filteredDocs.map((doc) => (
-              <motion.li
-                key={doc.id}
-                layout
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.25 }}
-              >
-                <Banded level={doc.classification} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Level level={doc.classification} />
-                        <span className="rounded bg-line px-1.5 py-0.5 text-[0.7rem] uppercase font-mono text-muted">
-                          {doc.kind}
-                        </span>
-                        <span className="rounded bg-line px-1.5 py-0.5 text-[0.7rem] font-mono text-muted">
-                          v{doc.version || 1}
-                        </span>
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${
-                          doc.status === "active" ? "bg-emerald-100 text-emerald-800" :
-                          doc.status === "failed" ? "bg-rose-100 text-rose-800" :
-                          doc.status === "flagged" ? "bg-amber-100 text-amber-800" : "bg-sky-100 text-sky-800"
-                        }`}>
-                          {doc.status}
-                        </span>
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-xs">
+          <table className="w-full text-left text-sm hidden md:table">
+            <thead className="border-b border-line bg-surface-subtle/70 text-xs text-muted font-mono uppercase tracking-wider">
+              <tr>
+                <th className="px-4 py-3 font-medium">Document Title</th>
+                <th className="px-4 py-3 font-medium">Clearance</th>
+                <th className="px-4 py-3 font-medium">Shared With</th>
+                <th className="px-4 py-3 font-medium">Pages</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {filteredDocs.map((doc) => (
+                <tr
+                  key={doc.id}
+                  onClick={() => {
+                    setSelectedDoc(doc);
+                    setDocDrawerTab("access");
+                    setPreviewPage(1);
+                  }}
+                  className="cursor-pointer hover:bg-surface-hover/70 transition-colors group"
+                >
+                  <td className="px-4 py-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-ink font-mono text-[0.65rem] uppercase font-bold border border-line">
+                        {doc.kind}
                       </div>
-
-                      <p className="display mt-1 text-2xl font-semibold text-ink">{doc.title}</p>
-                      <p className="text-xs text-muted font-mono">
-                        {doc.filename} • {doc.page_count} page(s)
-                        {doc.checksum && ` • SHA: ${doc.checksum.slice(0, 10)}…`}
-                      </p>
-
-                      {doc.note && (
-                        <p className={`mt-1 text-xs ${doc.flagged || doc.status === "failed" ? "text-warn font-medium" : "text-muted"}`}>
-                          {doc.note}
+                      <div className="min-w-0">
+                        <p className="font-semibold text-ink text-sm group-hover:text-accent truncate">
+                          {doc.title}
                         </p>
-                      )}
+                        <p className="text-[0.7rem] text-muted font-mono truncate">{doc.filename}</p>
+                      </div>
                     </div>
+                  </td>
+                  <td className="px-4 py-3.5">
+                    <ClearancePill clearance={doc.classification} label={doc.classification_label} />
+                  </td>
+                  <td className="px-4 py-3.5">
+                    <span className="text-xs text-ink/90 font-medium">
+                      {getSharedWithSummary(doc)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3.5 text-xs text-muted font-mono">
+                    {doc.page_count > 0 ? `${doc.page_count} page${doc.page_count > 1 ? "s" : ""}` : "0 pages (scanned)"}
+                  </td>
+                  <td className="px-4 py-3.5">
+                    <StatusPill status={doc.status} />
+                  </td>
+                  <td className="px-4 py-3.5 text-right">
+                    <span className="text-xs text-accent underline underline-offset-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      Inspect →
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {doc.readable && doc.page_count > 0 && (
-                        <Button kind="secondary" onClick={() => { setPreviewDoc(doc); setPreviewPage(1); }}>
-                          Page Preview
-                        </Button>
-                      )}
-                      {/* Delegated access request button for Team Leads & Dept Managers */}
-                      {isDeptLead && users.length > 0 && (
-                        <Button kind="secondary" onClick={() => setDelegatingDoc(doc)}>
-                          Request for Teammate
-                        </Button>
-                      )}
-                      {doc.flagged && isDocManager && (
-                        <Button
-                          kind="primary"
-                          onClick={() => {
-                            const found = flaggedDocs.find((f) => f.id === doc.id);
-                            setReviewingFlagged(found || {
-                              id: doc.id,
-                              title: doc.title,
-                              filename: doc.filename,
-                              classification: doc.classification,
-                              status: doc.status,
-                              note: doc.note,
-                              created_at: "",
-                              sample_chunks: [],
-                            });
-                          }}
-                        >
-                          Review Flagged
-                        </Button>
-                      )}
-                      {canManage && (
-                        <Button kind="secondary" onClick={() => inspectJob(doc)}>
-                          Job Status
-                        </Button>
-                      )}
-                      {canManage && (
-                        <Button kind="secondary" onClick={() => reprocess(doc)}>
-                          Reprocess
-                        </Button>
-                      )}
-                      {canDelete && (
-                        <Button kind="danger" onClick={() => remove(doc)}>
-                          Delete
-                        </Button>
-                      )}
-                    </div>
+          {/* Mobile Stacked Card View (<768px) */}
+          <div className="divide-y divide-line md:hidden">
+            {filteredDocs.map((doc) => (
+              <div
+                key={doc.id}
+                onClick={() => {
+                  setSelectedDoc(doc);
+                  setDocDrawerTab("access");
+                  setPreviewPage(1);
+                }}
+                className="p-4 space-y-2 cursor-pointer active:bg-surface-subtle"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-ink text-sm">{doc.title}</h3>
+                    <p className="text-[0.7rem] text-muted font-mono">{doc.filename}</p>
                   </div>
-
-                  {canManageGrants && doc.access && (
-                    <div className="mt-4 pt-3 border-t border-line/60">
-                      <AccessEditor doc={doc} roles={roles} users={users} departments={departments} onSave={saveAccess} />
-                    </div>
-                  )}
-                </Banded>
-              </motion.li>
+                  <StatusPill status={doc.status} />
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted pt-1">
+                  <ClearancePill clearance={doc.classification} label={doc.classification_label} />
+                  <span className="font-mono text-[0.7rem]">{doc.page_count} page(s)</span>
+                </div>
+              </div>
             ))}
-          </AnimatePresence>
-        </ul>
-      )}
-
-      {/* Page Preview Modal */}
-      {previewDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-line bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-start justify-between border-b border-line pb-3">
-              <div>
-                <h3 className="display text-2xl">{previewDoc.title}</h3>
-                <p className="text-xs text-muted">Page {previewPage} of {previewDoc.page_count}</p>
-              </div>
-              <Button kind="secondary" onClick={() => setPreviewDoc(null)}>Close</Button>
-            </div>
-
-            <div className="my-4 flex items-center justify-center min-h-[300px] rounded-lg border border-line bg-surface p-2">
-              {previewImgUrl ? (
-                <img src={previewImgUrl} alt={`Page ${previewPage}`} className="max-h-[60vh] object-contain rounded shadow-sm" />
-              ) : (
-                <p className="text-xs text-muted">No preview image available for this page.</p>
-              )}
-            </div>
-
-            {previewDoc.page_count > 1 && (
-              <div className="flex items-center justify-between pt-2">
-                <Button
-                  kind="secondary"
-                  disabled={previewPage <= 1}
-                  onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
-                >
-                  Previous Page
-                </Button>
-                <span className="text-xs font-mono text-muted">Page {previewPage} / {previewDoc.page_count}</span>
-                <Button
-                  kind="secondary"
-                  disabled={previewPage >= previewDoc.page_count}
-                  onClick={() => setPreviewPage((p) => Math.min(previewDoc.page_count, p + 1))}
-                >
-                  Next Page
-                </Button>
-              </div>
-            )}
           </div>
         </div>
       )}
 
-      {/* Flagged Document Quarantine Review Modal */}
-      {reviewingFlagged && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-line bg-surface p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-start justify-between border-b border-line pb-3">
-              <div>
-                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
-                  Quarantine Review
-                </span>
-                <h3 className="display text-2xl mt-1 text-ink">{reviewingFlagged.title}</h3>
-                <p className="text-xs text-muted font-mono">{reviewingFlagged.filename}</p>
+      {/* 5. Document Details Side Drawer */}
+      <Drawer
+        isOpen={Boolean(selectedDoc)}
+        onClose={() => setSelectedDoc(null)}
+        title={selectedDoc?.title || "Document Details"}
+        subtitle={selectedDoc ? `${selectedDoc.filename} • ${selectedDoc.kind.toUpperCase()}` : undefined}
+        widthClass="max-w-2xl"
+      >
+        {selectedDoc && (
+          <div className="space-y-6">
+            {/* Drawer Tabs Bar */}
+            <div className="flex border-b border-line gap-4 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setDocDrawerTab("access")}
+                className={`pb-2.5 transition-colors border-b-2 ${
+                  docDrawerTab === "access"
+                    ? "border-ink text-ink font-semibold"
+                    : "border-transparent text-muted hover:text-ink"
+                }`}
+              >
+                Access & Roles
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocDrawerTab("pages")}
+                className={`pb-2.5 transition-colors border-b-2 ${
+                  docDrawerTab === "pages"
+                    ? "border-ink text-ink font-semibold"
+                    : "border-transparent text-muted hover:text-ink"
+                }`}
+              >
+                Page Preview ({selectedDoc.page_count})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocDrawerTab("processing")}
+                className={`pb-2.5 transition-colors border-b-2 ${
+                  docDrawerTab === "processing"
+                    ? "border-ink text-ink font-semibold"
+                    : "border-transparent text-muted hover:text-ink"
+                }`}
+              >
+                Pipeline Status
+              </button>
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={() => setDocDrawerTab("danger")}
+                  className={`pb-2.5 transition-colors border-b-2 ${
+                    docDrawerTab === "danger"
+                      ? "border-deny text-deny font-semibold"
+                      : "border-transparent text-muted hover:text-deny"
+                  }`}
+                >
+                  Danger Zone
+                </button>
+              )}
+            </div>
+
+            {/* TAB 1: Access & Roles */}
+            {docDrawerTab === "access" && (
+              <div className="space-y-4">
+                {canManageGrants ? (
+                  <AccessEditor
+                    doc={selectedDoc}
+                    roles={roles}
+                    users={users}
+                    departments={departments}
+                    onSave={saveAccess}
+                  />
+                ) : (
+                  <div className="rounded-xl border border-line bg-surface p-4 space-y-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-ink">Access Scope:</span>
+                      <ClearancePill clearance={selectedDoc.classification} />
+                    </div>
+                    <p className="text-muted leading-relaxed">
+                      This document is shared with: <strong className="text-ink">{getSharedWithSummary(selectedDoc)}</strong>.
+                    </p>
+                    {isDeptLead && (
+                      <Button
+                        kind="secondary"
+                        onClick={() => setDelegatingDoc(selectedDoc)}
+                        className="mt-2"
+                      >
+                        Request access for team member
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
-              <Button kind="secondary" onClick={() => setReviewingFlagged(null)} disabled={reviewBusy}>
-                Close
-              </Button>
+            )}
+
+            {/* TAB 2: Page Previews */}
+            {docDrawerTab === "pages" && (
+              <div className="space-y-4">
+                {selectedDoc.page_count === 0 ? (
+                  <div className="rounded-xl border border-dashed border-line bg-surface-subtle p-6 text-center text-xs text-muted space-y-2">
+                    <p className="font-semibold text-ink">0 Readable Pages Rendered</p>
+                    <p>
+                      This file was ingested as a tabular spreadsheet or raw text format. Optical page snapshots are generated for PDF and image scans.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted font-mono">
+                        Viewing Page {previewPage} of {selectedDoc.page_count}
+                      </span>
+                      {selectedDoc.page_count > 1 && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            kind="secondary"
+                            disabled={previewPage <= 1}
+                            onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                          >
+                            <ChevronLeft className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            kind="secondary"
+                            disabled={previewPage >= selectedDoc.page_count}
+                            onClick={() => setPreviewPage((p) => Math.min(selectedDoc.page_count, p + 1))}
+                          >
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex min-h-[350px] items-center justify-center rounded-xl border border-line bg-surface p-2 shadow-inner">
+                      {previewImgLoading ? (
+                        <div className="p-8 text-xs text-muted">Loading page render…</div>
+                      ) : previewImgUrl ? (
+                        <img
+                          src={previewImgUrl}
+                          alt={`Page ${previewPage}`}
+                          className="max-h-[550px] w-full object-contain rounded-lg border border-line"
+                        />
+                      ) : (
+                        <p className="text-xs text-muted">No preview image available.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: Pipeline Status & Reprocessing */}
+            {docDrawerTab === "processing" && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-line bg-surface p-4 space-y-3 text-xs">
+                  <div className="flex justify-between py-1.5 border-b border-line">
+                    <span className="text-muted">Document ID:</span>
+                    <span className="font-mono text-ink">{selectedDoc.id}</span>
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b border-line">
+                    <span className="text-muted">Status:</span>
+                    <StatusPill status={selectedDoc.status} />
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b border-line">
+                    <span className="text-muted">Pipeline Stage:</span>
+                    <span className="font-semibold text-accent capitalize">
+                      {jobStatus?.stage || "Indexing Complete"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b border-line">
+                    <span className="text-muted">Total Pages:</span>
+                    <span className="font-mono">{selectedDoc.page_count}</span>
+                  </div>
+                  {selectedDoc.checksum && (
+                    <div className="flex justify-between py-1.5 border-b border-line">
+                      <span className="text-muted">SHA-256 Checksum:</span>
+                      <span className="font-mono text-[0.65rem] text-ink truncate max-w-xs">
+                        {selectedDoc.checksum}
+                      </span>
+                    </div>
+                  )}
+                  {selectedDoc.note && (
+                    <div className="py-1.5">
+                      <span className="text-muted block">Ingestion Note:</span>
+                      <p className="mt-1 text-ink">{selectedDoc.note}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <Button
+                    kind="secondary"
+                    onClick={() => reprocessDoc(selectedDoc)}
+                    className="flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Reprocess Document</span>
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: Danger Zone */}
+            {docDrawerTab === "danger" && canDelete && (
+              <div className="rounded-xl border border-deny-border bg-deny-bg/40 p-5 space-y-3">
+                <h3 className="display text-xl font-semibold text-deny">Delete this document</h3>
+                <p className="text-xs text-muted leading-relaxed">
+                  Deleting this document permanently purges the source file and deletes all associated passage vector embeddings from the isolated index.
+                </p>
+                <div className="pt-2">
+                  <Button
+                    kind="danger"
+                    onClick={() => setDeletingDoc(selectedDoc)}
+                    className="flex items-center gap-1.5"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Delete "{selectedDoc.title}"</span>
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Drawer>
+
+      {/* 6. Upload Document Drawer */}
+      <Drawer
+        isOpen={uploadDrawerOpen}
+        onClose={() => setUploadDrawerOpen(false)}
+        title="Upload Document"
+        subtitle="Ingest PDF, scanned images, Excel or Markdown files with automated pre-indexing security checks."
+      >
+        <UploadForm
+          roles={roles}
+          departments={departments}
+          onDone={() => {
+            setUploadDrawerOpen(false);
+            showToast("Document uploaded and queued for indexing.", "success");
+            load();
+          }}
+          onCancel={() => setUploadDrawerOpen(false)}
+        />
+      </Drawer>
+
+      {/* 7. Quarantine Review Drawer */}
+      <Drawer
+        isOpen={Boolean(reviewingFlagged)}
+        onClose={() => setReviewingFlagged(null)}
+        title="Quarantine Review"
+        subtitle={reviewingFlagged?.title}
+      >
+        {reviewingFlagged && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs space-y-1.5">
+              <p className="font-semibold text-amber-900">Ingestion Sanitizer Flag Reason:</p>
+              <p className="text-amber-800 leading-relaxed">
+                {reviewingFlagged.note || "Indirect prompt injection pattern identified in source text."}
+              </p>
             </div>
 
-            <div className="rounded-lg border border-amber-300 bg-amber-50/50 p-4 text-xs space-y-1">
-              <p className="font-semibold text-amber-900">Ingestion Sanitizer Flag Reasoning:</p>
-              <p className="text-amber-800">{reviewingFlagged.note || "Indirect prompt injection pattern detected during ingestion extraction."}</p>
-            </div>
-
-            {reviewingFlagged.sample_chunks.length > 0 && (
+            {reviewingFlagged.sample_chunks && reviewingFlagged.sample_chunks.length > 0 && (
               <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted font-mono">Sample Extracted Chunk Excerpts:</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted font-mono">
+                  Extracted Sample Passages:
+                </p>
                 <div className="space-y-2 max-h-48 overflow-y-auto">
                   {reviewingFlagged.sample_chunks.map((chunk, idx) => (
-                    <div key={idx} className="rounded-md border border-line bg-bg p-3 text-xs font-mono text-muted">
-                      <span className="font-semibold text-ink">Page {chunk.page}: </span>
+                    <div
+                      key={idx}
+                      className="rounded-lg border border-line bg-surface-subtle p-3 text-xs font-mono text-ink"
+                    >
+                      <span className="font-bold text-accent">Page {chunk.page}: </span>
                       {chunk.text}
                     </div>
                   ))}
@@ -504,10 +820,13 @@ export default function Documents() {
             )}
 
             <div>
-              <label className="block text-xs font-medium text-ink mb-1">Auditor / Review Note (Optional):</label>
+              <label className="block text-xs font-medium text-ink mb-1">
+                Auditor / Review Note (Optional):
+              </label>
               <input
-                className={inputClass}
-                placeholder="e.g. Verified harmless sample document text, confirmed safe for indexing."
+                type="text"
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
+                placeholder="e.g. Verified harmless sample document, approved for vector search."
                 value={reviewNote}
                 onChange={(e) => setReviewNote(e.target.value)}
                 disabled={reviewBusy}
@@ -520,117 +839,85 @@ export default function Documents() {
                 onClick={() => handleFlaggedDecision(reviewingFlagged.id, "purge")}
                 disabled={reviewBusy}
               >
-                Purge & Delete File
+                Purge File
               </Button>
               <Button
                 kind="primary"
                 onClick={() => handleFlaggedDecision(reviewingFlagged.id, "approve")}
                 disabled={reviewBusy}
               >
-                {reviewBusy ? "Saving..." : "✓ Approve & Activate in Vector DB"}
+                {reviewBusy ? "Saving..." : "Approve & Activate"}
               </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Drawer>
 
-      {/* Delegated Access Request Modal */}
-      {delegatingDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-6 shadow-xl space-y-4">
-            <h3 className="display text-xl font-semibold text-ink">Request Access for Team Member</h3>
-            <p className="text-xs text-muted">
-              Submit a delegated grant request for <strong className="text-ink">{delegatingDoc.title}</strong> on behalf of a teammate.
-            </p>
-
-            <form onSubmit={submitDelegatedRequest} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-ink mb-1">Select Teammate *</label>
-                <select
-                  className={inputClass}
-                  value={delegateTargetUser}
-                  onChange={(e) => setDelegateTargetUser(e.target.value)}
-                  required
-                >
-                  <option value="">Choose a team member...</option>
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.roles.join(", ")} • Clearance L{u.clearance})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-ink mb-1">Business Justification *</label>
-                <textarea
-                  className={`${inputClass} min-h-[90px]`}
-                  placeholder="Explain why this team member requires access to this document for their project assignment..."
-                  value={delegateReason}
-                  onChange={(e) => setDelegateReason(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  type="button"
-                  kind="secondary"
-                  onClick={() => { setDelegatingDoc(null); setDelegateTargetUser(""); setDelegateReason(""); }}
-                  disabled={delegateSubmitting}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={delegateSubmitting || !delegateTargetUser || !delegateReason.trim()}>
-                  {delegateSubmitting ? "Submitting..." : "Submit Delegated Request"}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Job Status Modal */}
-      {jobStatus && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl border border-line bg-white p-6 shadow-xl">
-            <h3 className="display text-2xl">Ingestion Job Status</h3>
-            <div className="mt-4 space-y-2.5 text-xs">
-              <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Document ID:</span>
-                <span className="font-mono">{jobStatus.document_id}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Status:</span>
-                <span className="font-semibold">{jobStatus.status}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Pipeline Stage:</span>
-                <span className="font-semibold capitalize text-accent">{jobStatus.stage}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Page Count:</span>
-                <span>{jobStatus.page_count}</span>
-              </div>
-              {jobStatus.checksum && (
-                <div className="flex justify-between py-1 border-b border-line">
-                  <span className="text-muted">Checksum:</span>
-                  <span className="font-mono text-[0.7rem]">{jobStatus.checksum.slice(0, 16)}…</span>
-                </div>
-              )}
-              {jobStatus.note && (
-                <div className="py-1">
-                  <span className="text-muted">Note:</span>
-                  <p className="mt-0.5 text-ink font-medium">{jobStatus.note}</p>
-                </div>
-              )}
+      {/* 8. Delegated Access Request Modal */}
+      <Drawer
+        isOpen={Boolean(delegatingDoc)}
+        onClose={() => setDelegatingDoc(null)}
+        title="Request for Team Member"
+        subtitle={delegatingDoc ? `Grant request for "${delegatingDoc.title}"` : undefined}
+      >
+        {delegatingDoc && (
+          <form onSubmit={submitDelegatedRequest} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1.5">Select Colleague *</label>
+              <select
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
+                value={delegateTargetUser}
+                onChange={(e) => setDelegateTargetUser(e.target.value)}
+                required
+              >
+                <option value="">Choose a team member...</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.roles.join(", ")} • Clearance L{u.clearance})
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="mt-6 flex justify-end">
-              <Button kind="secondary" onClick={() => setJobStatus(null)}>Close</Button>
+
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1.5">Business Justification *</label>
+              <textarea
+                className="w-full rounded-lg border border-line bg-surface p-3 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none min-h-[100px]"
+                placeholder="Explain why this colleague requires access to this document for project assignments..."
+                value={delegateReason}
+                onChange={(e) => setDelegateReason(e.target.value)}
+                required
+              />
             </div>
-          </div>
-        </div>
-      )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                kind="secondary"
+                onClick={() => setDelegatingDoc(null)}
+                disabled={delegateSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={delegateSubmitting || !delegateTargetUser || !delegateReason.trim()}>
+                {delegateSubmitting ? "Submitting..." : "Submit Delegated Request"}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Drawer>
+
+      {/* 9. Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={Boolean(deletingDoc)}
+        onClose={() => setDeletingDoc(null)}
+        onConfirm={confirmDelete}
+        title={`Delete "${deletingDoc?.title}"?`}
+        description="This will permanently delete the file and purge all associated vector embeddings from the search index."
+        confirmText="Yes, delete document"
+        tone="danger"
+        busy={deleteBusy}
+      />
     </div>
   );
 }

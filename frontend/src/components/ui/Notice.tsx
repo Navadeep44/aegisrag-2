@@ -1,10 +1,32 @@
 import type { ReactNode } from "react";
+import { AlertCircle, Info } from "lucide-react";
 
-export function Notice({ tone, children }: { tone: "error" | "info"; children: ReactNode }) {
-  const style = tone === "error" ? "border-deny text-deny" : "border-line text-muted";
+export function Notice({
+  tone,
+  children,
+  className = "",
+}: {
+  tone: "error" | "info";
+  children: ReactNode;
+  className?: string;
+}) {
+  const isError = tone === "error";
+
   return (
-    <p role={tone === "error" ? "alert" : undefined} className={`rounded-md border bg-surface px-3.5 py-2.5 text-sm ${style}`}>
-      {children}
-    </p>
+    <div
+      role={isError ? "alert" : "status"}
+      className={`flex items-start gap-2.5 rounded-xl border p-3.5 text-xs sm:text-sm leading-relaxed ${
+        isError
+          ? "border-deny-border bg-deny-bg text-deny"
+          : "border-line bg-surface text-muted"
+      } ${className}`}
+    >
+      {isError ? (
+        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-deny" />
+      ) : (
+        <Info className="h-4 w-4 shrink-0 mt-0.5 text-sky-600" />
+      )}
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
   );
 }

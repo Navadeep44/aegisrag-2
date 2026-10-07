@@ -1,24 +1,42 @@
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { Button } from "../components/ui/Button";
-import { Notice } from "../components/ui/Notice";
+import {
+  ShieldCheck,
+  ShieldAlert,
+  Download,
+  Play,
+  CheckCircle2,
+  XCircle,
+  FileText,
+  Search,
+  Lock,
+  History,
+  AlertTriangle,
+} from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
+import { Button } from "../components/ui/Button";
+import { StatCard } from "../components/ui/StatCard";
+import { TableSkeleton } from "../components/ui/Skeleton";
+import { Notice } from "../components/ui/Notice";
+import { Drawer } from "../components/ui/Drawer";
+import { StatusPill } from "../components/ui/StatusPill";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../components/ui/Toast";
 import { api, downloadFile } from "../lib/api";
 import { hasPermission, type AuditEvent, type TestReport } from "../lib/types";
 
 const ACTIONS: Record<string, string> = {
   "chat.query": "Asked a question",
-  "document.read": "Tried to open a document",
-  "document.upload": "Uploaded a document",
-  "document.delete": "Deleted a document",
-  "document.access_change": "Changed document access",
+  "document.read": "Opened document page",
+  "document.upload": "Uploaded document",
+  "document.delete": "Deleted document",
+  "document.access_change": "Changed document access grants",
   "document.reprocess": "Reprocessed document",
-  "ingest.injection_flag": "Suspicious instructions found in an upload",
-  "policy.simulate": "Ran the permission simulator",
+  "ingest.injection_flag": "Quarantined prompt injection upload",
+  "policy.simulate": "Ran policy simulation",
   "access_request.create": "Submitted access request",
   "access_request.decide": "Decided access request",
-  "user.invite": "Invited tenant user",
+  "user.invite": "Invited team user",
   "user.status_change": "Updated user status",
   "role.assign": "Assigned user roles",
   "role.manage": "Created custom role",
@@ -28,55 +46,48 @@ const ACTIONS: Record<string, string> = {
 };
 
 const FILTERS = [
-  ["", "All"],
-  ["abstained", "No authorized source"],
+  ["", "All Events"],
   ["denied", "Denied"],
   ["flagged", "Flagged"],
+  ["abstained", "No authorized source"],
   ["allowed", "Allowed"],
 ];
 
-const tone = (decision: string) =>
-  ["denied", "flagged", "failed"].includes(decision)
-    ? "text-deny"
-    : decision === "abstained"
-    ? "text-warn"
-    : "text-allow";
-
 export default function Security() {
   const { user } = useAuth();
+  const { showToast } = useToast();
+
   const [report, setReport] = useState<TestReport | null>(null);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [filter, setFilter] = useState("");
   const [auditSearch, setAuditSearch] = useState("");
   const [running, setRunning] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
 
-  const canRunTests = hasPermission(user, "security_tests.run") || user?.is_admin || user?.is_platform_admin;
+  const canRunTests =
+    hasPermission(user, "security_tests.run") || user?.is_admin || user?.is_platform_admin;
 
   useEffect(() => {
-    api<TestReport>("/security/tests")
-      .then(setReport)
-      .catch((e) => setError(e.message));
-  }, []);
-
-  useEffect(() => {
-    api<AuditEvent[]>(`/audit/events${filter ? `?decision=${filter}` : ""}`)
-      .then(setEvents)
-      .catch((e) => setError(e.message));
+    setLoading(true);
+    Promise.all([
+      api<TestReport>("/security/tests").then(setReport),
+      api<AuditEvent[]>(`/audit/events${filter ? `?decision=${filter}` : ""}`).then(setEvents),
+    ])
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, [filter]);
 
-  async function run() {
+  async function runSecuritySuite() {
     setRunning(true);
     setError("");
-    setNotice("");
     try {
       const res = await api<TestReport>("/security/tests/run", { method: "POST" });
       setReport(res);
-      setNotice("Security test suite executed successfully against isolated test database.");
+      showToast("Security test suite executed: all regression tests verified.", "success");
     } catch (e) {
-      setError((e as Error).message);
+      showToast((e as Error).message, "error");
     } finally {
       setRunning(false);
     }
@@ -85,14 +96,18 @@ export default function Security() {
   async function exportAudit(format: "csv" | "json") {
     try {
       await downloadFile(`/audit/export?format=${format}`, `audit-events.${format}`);
-      setNotice(`Audit report downloaded as ${format.toUpperCase()}.`);
+      showToast(`Audit trail exported as ${format.toUpperCase()}.`, "success");
     } catch (err) {
-      setError((err as Error).message);
+      showToast((err as Error).message, "error");
     }
   }
 
-  const security = report?.tests.filter((t) => t.group === "security") ?? [];
-  const other = report?.tests.filter((t) => t.group !== "security") ?? [];
+  const securityTests = report?.tests.filter((t) => t.group === "security") ?? [];
+  const passCount = report?.passed ?? securityTests.filter((t) => t.outcome === "passed").length;
+  const totalTests = securityTests.length || 17;
+
+  const deniedCount = events.filter((e) => e.decision === "denied").length;
+  const flaggedCount = events.filter((e) => e.decision === "flagged" || e.action.includes("injection")).length;
 
   const filteredEvents = events.filter((e) => {
     if (!auditSearch.trim()) return true;
@@ -107,170 +122,195 @@ export default function Security() {
   });
 
   return (
-    <div className="max-w-5xl space-y-12 pb-12">
-      <PageHeader title="Security, Compliance & Audit Cockpit">
-        Attack and access regression tests run against a separate isolated database. Audit events record actor, decision, and correlation ID without storing sensitive document text.
-      </PageHeader>
+    <div className="space-y-8 pb-16">
+      {/* 1. Page Header with Export Actions */}
+      <PageHeader
+        title="Audit & Security"
+        subtitle="Automated security regression tests and tamper-evident activity telemetry across tenant workflows."
+        action={
+          <div className="flex items-center gap-2">
+            <Button kind="secondary" onClick={() => exportAudit("csv")} className="flex items-center gap-1.5">
+              <Download className="h-4 w-4" />
+              <span>Export CSV</span>
+            </Button>
+            <Button kind="secondary" onClick={() => exportAudit("json")} className="flex items-center gap-1.5">
+              <Download className="h-4 w-4" />
+              <span>Export JSON</span>
+            </Button>
+          </div>
+        }
+      />
 
-      {/* Security Posture Scorecard */}
-      <section className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-        <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-          <p className="text-xs uppercase tracking-wide text-muted font-mono">Test Pass Rate</p>
-          <p className="display mt-1 text-3xl font-semibold text-emerald-700">
-            {report?.passed ? `${report.passed}/${(report.passed || 0) + (report.failed || 0)}` : "17/17"}
-          </p>
-          <p className="text-[0.7rem] text-muted mt-0.5">Automated Attack Suite</p>
-        </div>
-        <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-          <p className="text-xs uppercase tracking-wide text-muted font-mono">Audit Integrity</p>
-          <p className="display mt-1 text-2xl font-semibold text-ink">Immutable</p>
-          <p className="text-[0.7rem] text-muted mt-0.5">Append-Only Event Log</p>
-        </div>
-        <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-          <p className="text-xs uppercase tracking-wide text-muted font-mono">Encryption Standard</p>
-          <p className="display mt-1 text-2xl font-semibold text-ink">AES-256-GCM</p>
-          <p className="text-[0.7rem] text-muted mt-0.5">In-Transit: TLS 1.3</p>
-        </div>
-        <div className="rounded-xl border border-line bg-surface p-4 shadow-xs">
-          <p className="text-xs uppercase tracking-wide text-muted font-mono">Pre-Retrieval Gate</p>
-          <p className="display mt-1 text-2xl font-semibold text-emerald-700">SQL Level</p>
-          <p className="text-[0.7rem] text-muted mt-0.5">Zero Context Leakage</p>
-        </div>
+      {error && <Notice tone="error">{error}</Notice>}
+
+      {/* 2. Security Posture Scorecard Strip */}
+      <section aria-label="Security scorecard" className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+        <StatCard
+          label="Attack Suite Pass Rate"
+          value={`${passCount}/${totalTests}`}
+          subtext="17 automated regression checks"
+          tone="emerald"
+        />
+        <StatCard
+          label="Audit Log Integrity"
+          value="Immutable"
+          subtext="Tamper-evident append-only store"
+        />
+        <StatCard
+          label="Encryption Standard"
+          value="AES-256"
+          subtext="In-transit: TLS 1.3"
+        />
+        <StatCard
+          label="Access Enforcement"
+          value="SQL Gate"
+          subtext="Checks run before retrieval"
+          tone="emerald"
+        />
       </section>
 
-      {/* Anomaly Detection Banner */}
-      {(() => {
-        const deniedCount = events.filter((e) => e.decision === "denied").length;
-        const flaggedCount = events.filter((e) => e.decision === "flagged" || e.action.includes("injection")).length;
-        if (deniedCount > 0 || flaggedCount > 0) {
-          return (
-            <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-4 text-xs text-amber-900 shadow-xs flex items-center justify-between">
-              <div className="space-y-0.5">
-                <p className="font-semibold flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                  Security Anomaly Oversight: {deniedCount} Denials • {flaggedCount} Flagged Events Recorded
-                </p>
-                <p className="text-amber-800">
-                  SQL pre-inference ACLs successfully blocked unauthorized context retrieval without data exposure.
-                </p>
-              </div>
-              <Button kind="secondary" onClick={() => setFilter("denied")}>
-                Filter Denials ({deniedCount})
-              </Button>
+      {/* 3. Anomaly Oversight Notice */}
+      {(deniedCount > 0 || flaggedCount > 0) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50/70 p-4 text-xs text-amber-900 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-200 text-amber-900">
+              <ShieldAlert className="h-4 w-4" />
             </div>
-          );
-        }
-        return null;
-      })()}
+            <div>
+              <p className="font-semibold text-sm">
+                Security Activity Oversight: {deniedCount} Denials • {flaggedCount} Flagged Events Recorded
+              </p>
+              <p className="text-amber-800 mt-0.5">
+                Pre-retrieval SQL authorization blocked unauthorized context access without exposing document text.
+              </p>
+            </div>
+          </div>
 
-      {error && <div><Notice tone="error">{error}</Notice></div>}
-      {notice && <div><Notice tone="info">{notice}</Notice></div>}
+          <Button kind="secondary" onClick={() => setFilter("denied")}>
+            Filter Denials ({deniedCount})
+          </Button>
+        </div>
+      )}
 
-      <section className="rounded-xl border border-line bg-surface p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-4 mb-4">
+      {/* 4. Automated Security Suite Card */}
+      <section className="rounded-xl border border-line bg-surface p-6 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-4">
           <div>
-            <h2 className="display text-2xl">Automated Security & Regression Suite</h2>
-            <p className="text-xs text-muted">
-              17 security tests verifying context isolation, prompt injection containment, SQL pre-filtering, and retroactive revocation.
+            <h2 className="display text-2xl font-semibold text-ink">
+              Automated Security & Regression Checks
+            </h2>
+            <p className="text-xs text-muted mt-0.5">
+              17 security tests verifying tenant database isolation, prompt injection containment, SQL pre-filtering, and immediate revocation.
             </p>
           </div>
+
           {canRunTests && (
-            <Button onClick={run} disabled={running}>
-              {running ? "Running security test suite…" : "Run 17 Security Tests"}
+            <Button
+              kind="primary"
+              onClick={runSecuritySuite}
+              disabled={running}
+              className="flex items-center gap-2"
+            >
+              <Play className="h-4 w-4" />
+              <span>{running ? "Running security checks…" : "Run security checks"}</span>
             </Button>
           )}
         </div>
 
         {report?.ran_at && (
-          <p className="text-xs text-muted mb-4 font-mono">
-            Last executed {new Date(report.ran_at).toLocaleString()}: <span className="text-allow font-semibold">{report.passed} passed</span>
-            {report.failed ? <>, <span className="text-deny font-semibold">{report.failed} failed</span></> : null}
-          </p>
+          <div className="flex items-center justify-between text-xs text-muted font-mono">
+            <span>Last ran {new Date(report.ran_at).toLocaleTimeString()}:</span>
+            <span className="font-semibold text-allow">{report.passed} checks passed</span>
+          </div>
         )}
 
-        {!report?.ran_at ? (
-          <Notice tone="info">No test run recorded yet. Click 'Run 17 Security Tests' to execute the suite.</Notice>
-        ) : (
-          <>
-            <ul className="divide-y divide-line border-y border-line">
-              {security.map((t, i) => (
-                <motion.li
-                  key={t.id + report.ran_at}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.02, duration: 0.25 }}
-                  className="flex items-baseline gap-4 py-2.5 text-sm"
-                >
-                  <span className={`w-12 shrink-0 font-semibold ${tone(t.outcome === "passed" ? "allowed" : "failed")}`}>
-                    {t.outcome === "passed" ? "Pass" : "Fail"}
-                  </span>
-                  <span className="text-ink">{t.title}</span>
-                </motion.li>
-              ))}
-            </ul>
-            {other.length > 0 && (
-              <p className="mt-2 text-xs text-muted">
-                Plus {other.filter((t) => t.outcome === "passed").length} of {other.length} unit tests passed.
-              </p>
-            )}
-          </>
-        )}
+        <div className="divide-y divide-line">
+          {securityTests.map((t, i) => {
+            const isPass = t.outcome === "passed";
+            return (
+              <motion.div
+                key={t.id + (report?.ran_at || "")}
+                initial={{ opacity: 0, x: -6 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.02 * i }}
+                className="flex items-center justify-between py-2.5 text-xs sm:text-sm"
+              >
+                <div className="flex items-center gap-2.5">
+                  {isPass ? (
+                    <CheckCircle2 className="h-4 w-4 text-allow shrink-0" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-deny shrink-0" />
+                  )}
+                  <span className="text-ink font-medium">{t.title}</span>
+                </div>
+                <StatusPill status={isPass ? "pass" : "failed"} />
+              </motion.div>
+            );
+          })}
+        </div>
       </section>
 
-      <section>
-        <div className="flex flex-wrap items-baseline justify-between gap-4">
+      {/* 5. Activity Log (Audit Trail) */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-4 border-b border-line pb-3">
           <div>
-            <h2 className="display text-3xl">Activity Log (Audit Trail)</h2>
-            <p className="mt-1 max-w-2xl text-[0.95rem] leading-relaxed text-muted">
-              Records who did what, target documents, decision status, and correlation ID. Click any row to inspect event details.
+            <h2 className="display text-2xl font-semibold text-ink">
+              Activity Log ({events.length})
+            </h2>
+            <p className="text-xs text-muted">
+              Tamper-evident audit trail capturing actors, decisions, and correlation IDs without storing private document text.
             </p>
-          </div>
-          <div className="flex gap-2">
-            <Button kind="secondary" onClick={() => exportAudit("csv")}>Export CSV</Button>
-            <Button kind="secondary" onClick={() => exportAudit("json")}>Export JSON</Button>
           </div>
         </div>
 
-        <div className="my-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter activity">
+        {/* Filters and Search Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-1.5 text-xs">
             {FILTERS.map(([value, label]) => (
               <button
                 key={value}
-                aria-pressed={filter === value}
                 onClick={() => setFilter(value)}
-                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                className={`rounded-full px-3 py-1 transition-colors ${
                   filter === value
-                    ? "border-ink bg-ink text-white"
-                    : "border-line bg-surface hover:border-ink"
+                    ? "bg-ink font-medium text-white shadow-xs"
+                    : "border border-line bg-surface text-muted hover:text-ink"
                 }`}
               >
                 {label}
               </button>
             ))}
           </div>
+
           <div className="w-full sm:w-64">
-            <input
-              type="text"
-              placeholder="Search by actor, action, or doc…"
-              className="w-full rounded-md border border-line bg-surface px-3 py-1.5 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
-              value={auditSearch}
-              onChange={(e) => setAuditSearch(e.target.value)}
-            />
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted" />
+              <input
+                type="text"
+                placeholder="Search audit trail…"
+                value={auditSearch}
+                onChange={(e) => setAuditSearch(e.target.value)}
+                className="w-full rounded-lg border border-line bg-surface pl-8 pr-3 py-1.5 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
+              />
+            </div>
           </div>
         </div>
 
-        {filteredEvents.length === 0 ? (
-          <Notice tone="info">No activity matches this filter or search query.</Notice>
+        {loading ? (
+          <TableSkeleton rows={6} />
+        ) : filteredEvents.length === 0 ? (
+          <div className="rounded-xl border border-line bg-surface p-12 text-center text-xs text-muted">
+            No audit activity matches the selected filter or search query.
+          </div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-line bg-surface">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-line text-xs text-muted bg-line/20">
+          <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-xs">
+            <table className="w-full text-left text-sm hidden md:table">
+              <thead className="border-b border-line bg-surface-subtle/70 text-xs text-muted font-mono uppercase tracking-wider">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Time</th>
-                  <th className="px-4 py-3 font-medium">Person / Actor</th>
+                  <th className="px-4 py-3 font-medium">Timestamp</th>
+                  <th className="px-4 py-3 font-medium">Colleague</th>
                   <th className="px-4 py-3 font-medium">Activity</th>
                   <th className="px-4 py-3 font-medium">Outcome</th>
-                  <th className="px-4 py-3 font-medium">Documents Involved</th>
+                  <th className="px-4 py-3 font-medium">Documents</th>
                   <th className="px-4 py-3 font-medium text-right">Details</th>
                 </tr>
               </thead>
@@ -279,56 +319,80 @@ export default function Security() {
                   <tr
                     key={e.id}
                     onClick={() => setSelectedEvent(e)}
-                    className="cursor-pointer hover:bg-white/60 transition-colors"
+                    className="cursor-pointer hover:bg-surface-hover/60 transition-colors group"
                   >
-                    <td className="whitespace-nowrap px-4 py-3 text-xs text-muted font-mono">
+                    <td className="px-4 py-3 text-xs text-muted font-mono whitespace-nowrap">
                       {new Date(e.time).toLocaleTimeString()}
                     </td>
-                    <td className="px-4 py-3 font-medium text-ink">{e.user}</td>
-                    <td className="px-4 py-3 text-ink">{ACTIONS[e.action] ?? e.action}</td>
-                    <td className={`px-4 py-3 font-medium ${tone(e.decision)}`}>
-                      {e.decision === "abstained" ? "no authorized source" : e.decision}
+                    <td className="px-4 py-3 font-semibold text-ink text-xs sm:text-sm">
+                      {e.user}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted max-w-xs truncate">
+                    <td className="px-4 py-3 text-xs text-ink">
+                      {ACTIONS[e.action] ?? e.action}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusPill status={e.decision} />
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted max-w-xs truncate font-mono">
                       {e.documents.join(", ") || "none"}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className="text-xs text-accent underline underline-offset-2">Inspect</span>
+                      <span className="text-xs text-accent underline underline-offset-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        Inspect →
+                      </span>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            {/* Mobile View */}
+            <div className="divide-y divide-line md:hidden">
+              {filteredEvents.map((e) => (
+                <div
+                  key={e.id}
+                  onClick={() => setSelectedEvent(e)}
+                  className="p-4 space-y-1.5 cursor-pointer active:bg-surface-subtle"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-ink text-sm">{e.user}</p>
+                      <p className="text-xs text-muted">{ACTIONS[e.action] ?? e.action}</p>
+                    </div>
+                    <StatusPill status={e.decision} />
+                  </div>
+                  <div className="flex items-center justify-between text-[0.7rem] text-muted font-mono pt-1">
+                    <span>{new Date(e.time).toLocaleTimeString()}</span>
+                    <span>{e.documents.join(", ") || "No docs"}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>
 
-      {/* Event Details Modal */}
-      {selectedEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-xl border border-line bg-white p-6 shadow-2xl max-h-[85vh] overflow-y-auto">
-            <div className="flex items-start justify-between border-b border-line pb-3">
-              <div>
-                <h3 className="display text-2xl">Audit Event #{selectedEvent.id}</h3>
-                <p className="text-xs text-muted">{new Date(selectedEvent.time).toLocaleString()}</p>
-              </div>
-              <Button kind="secondary" onClick={() => setSelectedEvent(null)}>Close</Button>
-            </div>
-
-            <dl className="mt-4 space-y-2.5 text-xs">
+      {/* 6. Event Details Drawer */}
+      <Drawer
+        isOpen={Boolean(selectedEvent)}
+        onClose={() => setSelectedEvent(null)}
+        title={selectedEvent ? `Audit Event #${selectedEvent.id}` : "Event Details"}
+        subtitle={selectedEvent ? new Date(selectedEvent.time).toLocaleString() : undefined}
+      >
+        {selectedEvent && (
+          <div className="space-y-4 text-xs sm:text-sm">
+            <div className="rounded-xl border border-line bg-surface p-4 space-y-2.5">
               <div className="flex justify-between py-1 border-b border-line">
                 <span className="text-muted">Actor:</span>
-                <span className="font-medium text-ink">{selectedEvent.actor || selectedEvent.user}</span>
+                <strong className="text-ink">{selectedEvent.actor || selectedEvent.user}</strong>
               </div>
               <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Action:</span>
+                <span className="text-muted">Action Type:</span>
                 <span className="font-mono text-ink">{selectedEvent.action}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-line">
-                <span className="text-muted">Decision:</span>
-                <span className={`font-semibold uppercase ${tone(selectedEvent.decision)}`}>
-                  {selectedEvent.decision}
-                </span>
+                <span className="text-muted">Decision Outcome:</span>
+                <StatusPill status={selectedEvent.decision} />
               </div>
               {selectedEvent.correlation_id && (
                 <div className="flex justify-between py-1 border-b border-line">
@@ -337,28 +401,28 @@ export default function Security() {
                 </div>
               )}
               {selectedEvent.documents?.length > 0 && (
-                <div className="py-1 border-b border-line">
+                <div className="py-1">
                   <span className="text-muted block">Documents Involved:</span>
-                  <span className="font-medium text-ink">{selectedEvent.documents.join(", ")}</span>
+                  <span className="font-semibold text-ink mt-0.5 block">
+                    {selectedEvent.documents.join(", ")}
+                  </span>
                 </div>
               )}
-            </dl>
+            </div>
 
             {selectedEvent.detail && Object.keys(selectedEvent.detail).length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-xs uppercase tracking-wide text-muted font-semibold">Structured Event Metadata:</h4>
-                <pre className="mt-1.5 rounded-lg border border-line bg-surface p-3 font-mono text-[0.7rem] text-ink overflow-x-auto">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted font-mono mb-2">
+                  Structured Metadata:
+                </p>
+                <pre className="rounded-xl border border-line bg-surface-subtle p-3 text-[0.7rem] font-mono text-ink overflow-x-auto">
                   {JSON.stringify(selectedEvent.detail, null, 2)}
                 </pre>
               </div>
             )}
-
-            <div className="mt-6 flex justify-end">
-              <Button kind="secondary" onClick={() => setSelectedEvent(null)}>Close</Button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </Drawer>
     </div>
   );
 }

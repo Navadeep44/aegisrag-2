@@ -1,27 +1,61 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Hanken Grotesk Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Hanken Grotesk Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Paper, ink and one green. Colour is otherwise reserved for classification. */
-  --color-page: #f7f7f6;
+  /* Paper, ink, subtle tinted surfaces and semantic indicators */
+  --color-page: #f8f7f4;
   --color-surface: #ffffff;
+  --color-surface-subtle: #f2f1ec;
+  --color-surface-hover: #ebe9e2;
   --color-ink: #0f1215;
-  --color-muted: #646a72;
-  --color-line: #e2e3e1;
-  --color-accent: #1c4a3a;
-  --color-allow: #1f6b4a;
-  --color-deny: #8c2f2b;
-  --color-warn: #9a6b15;
-  --color-level-0: #7a8088;
-  --color-level-1: #3d5a73;
-  --color-level-2: #9a6b15;
-  --color-level-3: #8c2f2b;
+  --color-ink-light: #24292f;
+  --color-muted: #5c6470;
+  --color-muted-light: #8c939e;
+  --color-line: #e4e3de;
+  --color-line-subtle: #eeede8;
+
+  /* Accent & Status tokens */
+  --color-accent: #17382d;
+  --color-accent-hover: #10261f;
+  --color-accent-light: #e8f0ec;
+  
+  --color-allow: #166534;
+  --color-allow-bg: #edf7ee;
+  --color-allow-border: #bbf7d0;
+
+  --color-warn: #854d0e;
+  --color-warn-bg: #fefce8;
+  --color-warn-border: #fef08a;
+
+  --color-deny: #991b1b;
+  --color-deny-bg: #fef2f2;
+  --color-deny-border: #fecaca;
+
+  /* Clearance Level Tokens */
+  --color-level-0: #64748b;
+  --color-level-1: #2563eb;
+  --color-level-2: #b45309;
+  --color-level-3: #b91c1c;
+
+  /* Radius tokens (8 / 12 / 20) */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 9999px;
+
+  /* Soft shadow tokens */
+  --shadow-xs: 0 1px 2px rgba(15, 18, 21, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 18, 21, 0.06), 0 1px 2px rgba(15, 18, 21, 0.04);
+  --shadow-md: 0 4px 12px -2px rgba(15, 18, 21, 0.08), 0 2px 6px rgba(15, 18, 21, 0.04);
+  --shadow-lg: 0 14px 28px -6px rgba(15, 18, 21, 0.12), 0 6px 12px rgba(15, 18, 21, 0.05);
 }
 
 html {
   scroll-behavior: smooth;
+  background-color: var(--color-page);
 }
 
 body {
@@ -29,17 +63,35 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* Serif Display Heading with relaxed tracking */
 .display {
   font-family: var(--font-display);
   font-weight: 400;
-  letter-spacing: -0.012em;
-  line-height: 1.04;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d5d4ce;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b5b4ad;
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-ink);
   outline-offset: 2px;
 }
 
@@ -48,8 +100,15 @@ body {
   color: #fff;
 }
 
+/* Reduced motion overrides */
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

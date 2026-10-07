@@ -1,110 +1,166 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
+import { User, Shield, KeyRound, LogOut, Search, Building2, Mail, CheckCircle2 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
-import { useAuth } from "../context/AuthContext";
+import { SectionCard } from "../components/ui/SectionCard";
 import { Button } from "../components/ui/Button";
+import { StatusPill, RolePill, ClearancePill } from "../components/ui/StatusPill";
+import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 export default function Profile() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!user) return null;
 
+  const clearanceExplanations: Record<number, string> = {
+    0: "Access to public announcements, marketing materials, and general knowledge.",
+    1: "Access to internal company guidelines, handbooks, and general department docs.",
+    2: "Access to confidential business operations, roadmaps, and departmental files.",
+    3: "Access to executive strategies, legal agreements, and restricted financial records.",
+  };
+
+  const filteredPermissions = (user.permissions || []).filter((p) =>
+    p.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <div className="max-w-4xl space-y-8 pb-12">
-      <PageHeader title="My Profile">
-        Identity, organization membership, clearance tier, and server-side computed permissions.
-      </PageHeader>
+    <div className="space-y-8 pb-12">
+      <PageHeader
+        title="My Profile"
+        subtitle="Your identity details, organization membership, clearance tier, and computed permissions."
+      />
 
       <div className="grid gap-6 md:grid-cols-2">
-        <section className="rounded-xl border border-line bg-surface p-6 shadow-sm">
-          <h2 className="display text-2xl">Identity & Tenant</h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted">Full Name</dt>
-              <dd className="font-medium text-ink">{user.name}</dd>
+        {/* Identity & Workspace Card */}
+        <SectionCard
+          title="Identity & Workspace"
+          subtitle="Your personal profile information within this workspace."
+        >
+          <div className="flex items-center gap-4 border-b border-line pb-5">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-subtle border border-line text-lg font-bold text-ink">
+              {user.name
+                .split(" ")
+                .map((n) => n[0])
+                .slice(0, 2)
+                .join("")}
             </div>
             <div>
-              <dt className="text-xs uppercase tracking-wide text-muted">Email</dt>
-              <dd className="font-mono text-ink">{user.email}</dd>
+              <h3 className="display text-xl font-semibold text-ink">{user.name}</h3>
+              <p className="font-mono text-xs text-muted">{user.email}</p>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted">Organization / Tenant</dt>
+          </div>
+
+          <dl className="mt-5 space-y-4 text-sm">
+            <div className="flex items-center justify-between">
+              <dt className="text-xs uppercase tracking-wider font-mono text-muted">Organization</dt>
               <dd className="font-medium text-ink">{user.tenant}</dd>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted">Department</dt>
-              <dd className="text-ink">{user.department_id || "General"}</dd>
+            <div className="flex items-center justify-between">
+              <dt className="text-xs uppercase tracking-wider font-mono text-muted">Department</dt>
+              <dd className="font-medium text-ink">{user.department_id || "General"}</dd>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted">Account Status</dt>
+            <div className="flex items-center justify-between">
+              <dt className="text-xs uppercase tracking-wider font-mono text-muted">Account Status</dt>
               <dd>
-                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${user.status === "active" ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>
-                  {user.status}
-                </span>
+                <StatusPill status={user.status} />
               </dd>
             </div>
           </dl>
-        </section>
+        </SectionCard>
 
-        <section className="rounded-xl border border-line bg-surface p-6 shadow-sm">
-          <h2 className="display text-2xl">Security Attributes</h2>
-          <dl className="mt-4 space-y-3 text-sm">
+        {/* Security Attributes Card */}
+        <SectionCard
+          title="Security & Clearance"
+          subtitle="Your authorization tier and assigned organizational roles."
+        >
+          <div className="space-y-5">
             <div>
-              <dt className="text-xs uppercase tracking-wide text-muted">Clearance Level</dt>
-              <dd className="font-medium text-ink">
-                Level {user.clearance} — {user.clearance_label}
-              </dd>
+              <p className="text-xs uppercase tracking-wider font-mono text-muted">Clearance Tier</p>
+              <div className="mt-2 flex items-center gap-2.5">
+                <ClearancePill clearance={user.clearance} label={user.clearance_label} />
+              </div>
+              <p className="mt-2 text-xs text-muted leading-relaxed">
+                {clearanceExplanations[user.clearance] || "Standard clearance privileges."}
+              </p>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted">Assigned Roles</dt>
-              <dd className="mt-1 flex flex-wrap gap-1.5">
+
+            <div className="border-t border-line pt-4">
+              <p className="text-xs uppercase tracking-wider font-mono text-muted">Assigned Roles</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {user.roles.map((r) => (
-                  <span key={r} className="rounded-md border border-line bg-white px-2 py-0.5 text-xs font-medium text-ink shadow-xs">
-                    {r}
-                  </span>
+                  <RolePill key={r} role={r} />
                 ))}
-              </dd>
+              </div>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted">Privilege Scope</dt>
-              <dd className="text-ink">
-                {user.is_platform_admin ? "Global Platform Operator" : user.is_admin ? "Tenant Administrator" : "Standard Scoped Member"}
-              </dd>
+
+            <div className="border-t border-line pt-4">
+              <p className="text-xs uppercase tracking-wider font-mono text-muted">Privilege Scope</p>
+              <p className="mt-1 text-sm font-medium text-ink">
+                {user.is_platform_admin
+                  ? "Global Platform Operator"
+                  : user.is_admin
+                  ? "Organization Administrator"
+                  : "Standard Scoped Member"}
+              </p>
             </div>
-            <div className="pt-2">
-              <Button kind="secondary" onClick={() => { signOut(); navigate("/signin"); }}>
+
+            <div className="border-t border-line pt-4">
+              <Button
+                kind="secondary"
+                onClick={() => {
+                  signOut();
+                  navigate("/signin");
+                }}
+              >
+                <LogOut className="h-3.5 w-3.5 mr-1.5" />
                 Sign out / Switch Persona
               </Button>
             </div>
-          </dl>
-        </section>
+          </div>
+        </SectionCard>
       </div>
 
-      <section className="rounded-xl border border-line bg-surface p-6 shadow-sm">
-        <div className="flex items-baseline justify-between border-b border-line pb-3">
-          <h2 className="display text-2xl">Effective Permissions ({user.permissions?.length || 0})</h2>
-          <span className="text-xs text-muted">Computed server-side from active role bindings</span>
-        </div>
-        <p className="mt-2 text-xs text-muted">
-          AegisRAG enforces permissions at the API and SQL layer. Frontend visibility is never treated as security.
-        </p>
+      {/* Effective Permissions Card */}
+      <SectionCard
+        title={`Effective Permissions (${user.permissions?.length || 0})`}
+        subtitle="Computed dynamically on the server from your active role bindings. Frontend visibility never overrides database-level access checks."
+      >
+        <div className="space-y-4">
+          <div className="relative max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+            <input
+              type="text"
+              placeholder="Search permissions..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-lg border border-line bg-surface-subtle py-2 pl-9 pr-3 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
+            />
+          </div>
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 md:grid-cols-3">
-          {(user.permissions || []).map((perm, i) => (
-            <motion.div
-              key={perm}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.02 * i }}
-              className="flex items-center gap-2 rounded-md border border-line bg-white/60 px-3 py-2 text-xs font-mono text-ink"
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-              <span className="truncate">{perm}</span>
-            </motion.div>
-          ))}
+          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredPermissions.map((perm, i) => (
+              <motion.div
+                key={perm}
+                initial={{ opacity: 0, y: 3 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.015 * Math.min(i, 20) }}
+                className="flex items-center gap-2.5 rounded-lg border border-line bg-surface-subtle/50 px-3 py-2.5 text-xs font-mono text-ink"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                <span className="truncate">{perm}</span>
+              </motion.div>
+            ))}
+            {filteredPermissions.length === 0 && (
+              <p className="col-span-full py-4 text-center text-xs text-muted">
+                No matching permissions found.
+              </p>
+            )}
+          </div>
         </div>
-      </section>
+      </SectionCard>
     </div>
   );
 }

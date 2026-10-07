@@ -1,16 +1,33 @@
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Sparkles,
+  Upload,
+  KeyRound,
+  SlidersHorizontal,
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  ArrowRight,
+  Shield,
+  FileText,
+  Users,
+} from "lucide-react";
 import { Button } from "../components/ui/Button";
-import { Banded, Level } from "../components/ui/Classification";
+import { StatCard } from "../components/ui/StatCard";
+import { ClearancePill, RolePill, StatusPill } from "../components/ui/StatusPill";
+import { StatCardSkeleton } from "../components/ui/Skeleton";
 import { Notice } from "../components/ui/Notice";
-import { PageHeader } from "../components/ui/PageHeader";
+import { PinnedSteps } from "../components/motion/PinnedSteps";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import { DashboardStats, hasPermission, LEVELS } from "../lib/types";
+import { DashboardStats, hasPermission } from "../lib/types";
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -27,8 +44,11 @@ export default function Dashboard() {
   const isHr = roles.includes("hr");
   const isFinance = roles.includes("finance");
   const isEngineering = roles.includes("engineering");
-  const isExecutive = roles.includes("executive");
-  const isEmployee = !isAdmin && !isOwner && !isIamAdmin && !isDocManager && !isAuditor && !isPlatformAdmin;
+
+  const canUpload = hasPermission(user, "document.upload");
+  const canAssign = hasPermission(user, "role.assign");
+  const canSimulate = hasPermission(user, "policy.simulate") || isAdmin || isIamAdmin;
+  const canRunTests = hasPermission(user, "security_tests.run") || isAdmin || isAuditor;
 
   useEffect(() => {
     setLoading(true);
@@ -40,600 +60,316 @@ export default function Dashboard() {
 
   if (!user) return null;
 
+  // Personalized starter queries
+  const starterQueries = isFinance
+    ? [
+        "What was our annual revenue in FY2025?",
+        "What is the total on the Apex Solutions invoice?",
+        "What are the payment terms in the scanned invoice?",
+      ]
+    : isHr
+    ? [
+        "What is the salary band for a Senior Software Engineer (Level 4)?",
+        "How many days of annual leave do employees get?",
+        "What are the requirements for parental leave?",
+      ]
+    : isEngineering
+    ? [
+        "Which three services does the platform run on?",
+        "How is database-level access control enforced?",
+        "What database configurations are supported?",
+      ]
+    : [
+        "How many days of annual leave do employees get?",
+        "What are the IT onboarding steps for new laptops?",
+        "Who do I contact for IT support and VPN setup?",
+      ];
+
+  const firstName = user.name.split(" ")[0];
+
+  // Ingestion status summary numbers
+  const readyDocs = stats?.ingestion_jobs?.ready ?? stats?.document_status_counts?.active ?? stats?.accessible_documents ?? 0;
+  const processingDocs = (stats?.ingestion_jobs?.processing ?? 0) + (stats?.ingestion_jobs?.queued ?? 0);
+  const flaggedDocs = stats?.document_status_counts?.flagged ?? 0;
+
   return (
-    <div className="max-w-6xl space-y-8 pb-16">
-      {/* Header Banner */}
+    <div className="space-y-8 pb-16">
+      {/* 1. Greeting Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-6">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="display text-3xl font-semibold text-ink">
-              Welcome back, {user.name.split(" ")[0]}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="display text-3xl sm:text-4xl font-semibold text-ink">
+              Welcome back, {firstName}
             </h1>
-            <span className="rounded-full bg-line/60 px-3 py-1 text-xs font-mono text-ink">
-              {user.tenant || "Global Platform"}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <ClearancePill clearance={user.clearance} label={user.clearance_label} />
+              {roles.slice(0, 2).map((r) => (
+                <RolePill key={r} role={r} />
+              ))}
+            </div>
           </div>
-          <p className="mt-1 text-sm text-muted">
-            Logged in as <strong className="text-ink">{roles.join(", ")}</strong> • Clearance:{" "}
-            <strong className="text-ink">{user.clearance_label} (Level {user.clearance})</strong>
-            {user.department_id && ` • Department: ${user.department_id}`}
+          <p className="mt-1 text-xs sm:text-sm text-muted">
+            {user.tenant || "Global Platform"} {user.department_id ? `• ${user.department_id} Department` : ""}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Single Hero Primary Action */}
+        <div className="flex items-center gap-3">
           <Link to="/app/ask">
-            <Button kind="primary">Ask AI</Button>
+            <Button kind="primary" className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />
+              <span>Ask AI</span>
+            </Button>
           </Link>
-          {hasPermission(user, "document.upload") && (
-            <Link to="/app/documents">
-              <Button kind="secondary">Upload Document</Button>
-            </Link>
-          )}
-          <Link to="/app/access-requests">
-            <Button kind="secondary">Access Requests</Button>
-          </Link>
-          {isAdmin && (
-            <Link to="/app/simulator">
-              <Button kind="secondary">Simulator</Button>
-            </Link>
-          )}
         </div>
       </div>
 
       {error && <Notice tone="error">{error}</Notice>}
 
+      {/* 2. Loading State */}
       {loading && !stats && (
-        <div className="rounded-xl border border-line bg-surface p-12 text-center text-muted">
-          Loading workspace intelligence...
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
         </div>
       )}
 
+      {/* 3. Stat Cards Strip */}
       {stats && (
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
           className="space-y-8"
         >
-          {/* Top KPI Metrics Strip */}
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {stats.scope === "platform" ? (
-              <>
-                <div className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-                  <p className="text-xs uppercase tracking-wider text-muted font-mono">Managed Tenants</p>
-                  <p className="display mt-1 text-3xl font-semibold text-ink">{stats.tenants_count}</p>
-                  <p className="mt-1 text-xs text-muted">{stats.active_tenants} active • {stats.suspended_tenants} suspended</p>
-                </div>
-                <div className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-                  <p className="text-xs uppercase tracking-wider text-muted font-mono">Global Indexed Chunks</p>
-                  <p className="display mt-1 text-3xl font-semibold text-ink">{stats.total_chunks}</p>
-                  <p className="mt-1 text-xs text-muted">Across all isolated tenant databases</p>
-                </div>
-                <div className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-                  <p className="text-xs uppercase tracking-wider text-muted font-mono">Total Users</p>
-                  <p className="display mt-1 text-3xl font-semibold text-ink">{stats.total_users}</p>
-                  <p className="mt-1 text-xs text-muted">Provisioned platform-wide</p>
-                </div>
-                <div className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-                  <p className="text-xs uppercase tracking-wider text-muted font-mono">Platform Audit Events</p>
-                  <p className="display mt-1 text-3xl font-semibold text-ink">{stats.total_audits}</p>
-                  <p className="mt-1 text-xs text-muted">Immutable cross-tenant telemetry</p>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-                  <p className="text-xs uppercase tracking-wider text-muted font-mono">Authorized Documents</p>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="display text-3xl font-semibold text-ink">{stats.accessible_documents}</span>
-                    <span className="text-xs text-muted">of {stats.total_documents} total</span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted">Based on your clearance & roles</p>
-                </div>
+          {stats.scope === "platform" ? (
+            <section aria-label="Platform metrics" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                label="Managed Organizations"
+                value={stats.tenants_count ?? 0}
+                subtext={`${stats.active_tenants ?? 0} active • ${stats.suspended_tenants ?? 0} suspended`}
+              />
+              <StatCard
+                label="Indexed Knowledge Chunks"
+                value={stats.total_chunks ?? 0}
+                subtext="Across all isolated organization databases"
+              />
+              <StatCard
+                label="Provisioned Users"
+                value={stats.total_users ?? 0}
+                subtext="Total members across organizations"
+              />
+              <StatCard
+                label="Audit Events"
+                value={stats.total_audits ?? 0}
+                subtext="Tamper-evident activity log"
+              />
+            </section>
+          ) : (
+            <section aria-label="Workspace stats" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                label="Documents you can read"
+                value={stats.accessible_documents ?? 0}
+                total={stats.total_documents}
+                subtext="Matched to your clearance & active roles"
+                tone="default"
+              />
 
-                <div className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-                  <p className="text-xs uppercase tracking-wider text-muted font-mono">Your AI Queries</p>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="display text-3xl font-semibold text-ink">{stats.my_queries}</span>
-                    <span className="text-xs text-muted">({stats.total_queries} org total)</span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted">Zero-trust cited answers</p>
-                </div>
+              <StatCard
+                label="Your questions asked"
+                value={stats.my_queries ?? 0}
+                subtext={`${stats.total_queries ?? 0} total questions in organization`}
+                tone="default"
+              />
 
-                <div className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-                  <p className="text-xs uppercase tracking-wider text-muted font-mono">Pending Access Requests</p>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="display text-3xl font-semibold text-ink">
-                      {hasPermission(user, "role.assign") || hasPermission(user, "document.grant.manage") || isAdmin
-                        ? stats.pending_requests_count
-                        : stats.my_requests_count}
+              <StatCard
+                label="Pending access requests"
+                value={
+                  canAssign || isAdmin
+                    ? stats.pending_requests_count ?? 0
+                    : stats.my_requests_count ?? 0
+                }
+                subtext={
+                  canAssign || isAdmin
+                    ? "Awaiting your review"
+                    : "Requests submitted by you"
+                }
+                tone={stats.pending_requests_count ? "amber" : "default"}
+                onClick={() => navigate("/app/access-requests")}
+              />
+
+              {/* Ingestion & Protection Health Card */}
+              <div className="rounded-xl border border-line bg-surface p-5 shadow-xs space-y-2 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted font-mono">
+                      Knowledge Health
+                    </p>
+                    <span
+                      title="Access checks run before retrieval"
+                      className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.65rem] font-semibold text-emerald-800 border border-emerald-200"
+                    >
+                      <Shield className="h-3 w-3" />
+                      Protected
                     </span>
-                    <span className="text-xs text-muted">
-                      {hasPermission(user, "role.assign") || isAdmin ? "awaiting approval" : "submitted by you"}
-                    </span>
                   </div>
-                  <p className="mt-1 text-xs text-muted">Role and document grants</p>
-                </div>
-
-                <div className="rounded-xl border border-line bg-surface p-5 shadow-xs">
-                  <p className="text-xs uppercase tracking-wider text-muted font-mono">Security Enforcement</p>
-                  <p className="display mt-1 text-3xl font-semibold text-accent">100%</p>
-                  <p className="mt-1 text-xs text-muted">SQL pre-inference authorization</p>
-                </div>
-              </>
-            )}
-          </section>
-
-          {/* Persona-Specific Workspace Sections */}
-
-          {/* 1. PLATFORM SUPER ADMIN */}
-          {isPlatformAdmin && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Multi-Tenant Management & Oversight</h2>
-                  <p className="text-xs text-muted">Manage global customer tenant isolation, vector indices, and platform operations.</p>
-                </div>
-                <Link to="/app/platform">
-                  <Button kind="primary">Open Platform Console</Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Tenant Directory & Provisioning</p>
-                  <p className="mt-1 text-xs text-muted">Create new organization workspaces with custom storage and model quotas.</p>
-                  <Link to="/app/platform" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Manage Tenants →
-                  </Link>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Global Security & Compliance</p>
-                  <p className="mt-1 text-xs text-muted">Audit cross-tenant access attempts and monitor token throughput.</p>
-                  <Link to="/app/security" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    View Global Audit →
-                  </Link>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Emergency Tenant Killswitch</p>
-                  <p className="mt-1 text-xs text-muted">Instantly isolate any tenant in case of compliance or security alert.</p>
-                  <Link to="/app/platform" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Security Controls →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 2. ORGANIZATION OWNER */}
-          {isOwner && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Executive Governance & Knowledge Assets</h2>
-                  <p className="text-xs text-muted">Enterprise RAG adoption, knowledge classification distribution, and organizational policies.</p>
-                </div>
-                <Link to="/app/settings">
-                  <Button kind="secondary">Tenant Settings</Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-4 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs text-muted font-mono">Public (L0)</p>
-                  <p className="text-2xl font-semibold text-ink">{stats.classification_counts?.public || 0}</p>
-                  <p className="text-[0.7rem] text-muted">Open to all users</p>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs text-muted font-mono">Internal (L1)</p>
-                  <p className="text-2xl font-semibold text-ink">{stats.classification_counts?.internal || 0}</p>
-                  <p className="text-[0.7rem] text-muted">Standard company docs</p>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs text-muted font-mono">Confidential (L2)</p>
-                  <p className="text-2xl font-semibold text-ink">{stats.classification_counts?.confidential || 0}</p>
-                  <p className="text-[0.7rem] text-muted">Finance & Engineering</p>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs text-muted font-mono">Restricted (L3)</p>
-                  <p className="text-2xl font-semibold text-ink">{stats.classification_counts?.restricted || 0}</p>
-                  <p className="text-[0.7rem] text-muted">HR & Executive only</p>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 3. IT / SYSTEM ADMIN */}
-          {isAdmin && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">System Administration & Ingestion Pipeline</h2>
-                  <p className="text-xs text-muted">Real-time health of OCR parsers, vector embeddings, and policy simulation.</p>
-                </div>
-                <div className="flex gap-2">
-                  <Link to="/app/simulator">
-                    <Button kind="secondary">Policy Simulator</Button>
-                  </Link>
-                  <Link to="/app/security">
-                    <Button kind="secondary">Security Suite</Button>
-                  </Link>
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Ingestion Pipeline</p>
-                  <div className="mt-2 space-y-1 text-xs">
-                    <div className="flex justify-between text-muted">
-                      <span>Ready & Active:</span>
-                      <strong className="text-ink">{stats.ingestion_jobs?.ready || stats.document_status_counts?.active || 0}</strong>
+                  <div className="mt-2 text-xs text-muted space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span>Ready to search:</span>
+                      <strong className="text-ink font-medium">{readyDocs}</strong>
                     </div>
-                    <div className="flex justify-between text-muted">
-                      <span>Processing / Queued:</span>
-                      <strong className="text-ink">{(stats.ingestion_jobs?.processing || 0) + (stats.ingestion_jobs?.queued || 0)}</strong>
-                    </div>
-                    <div className="flex justify-between text-muted">
-                      <span>Failed / Flagged:</span>
-                      <strong className="text-accent">{stats.document_status_counts?.flagged || 0}</strong>
-                    </div>
+                    {processingDocs > 0 && (
+                      <div className="flex items-center justify-between text-sky-700">
+                        <span>Processing:</span>
+                        <strong>{processingDocs}</strong>
+                      </div>
+                    )}
+                    {flaggedDocs > 0 ? (
+                      <div className="flex items-center justify-between text-amber-700 font-medium">
+                        <span>Flagged for review:</span>
+                        <strong>{flaggedDocs}</strong>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between text-muted">
+                        <span>Flagged:</span>
+                        <span>0</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Policy Simulation Sandbox</p>
-                  <p className="mt-1 text-xs text-muted">Test any employee's query against authorization SQL clauses before deployment.</p>
-                  <Link to="/app/simulator" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Launch Simulator →
-                  </Link>
-                </div>
-
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Zero-Trust Attack Tests</p>
-                  <p className="mt-1 text-xs text-muted">Run automated regression attacks: prompt injection, cross-tenant, and clearance bypass.</p>
-                  <Link to="/app/security" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Run Attack Suite →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 4. IAM ADMIN */}
-          {isIamAdmin && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Identity & Access Management (IAM)</h2>
-                  <p className="text-xs text-muted">Custom role builder, clearance assignments, and privilege separation.</p>
-                </div>
-                <Link to="/app/users-and-roles">
-                  <Button kind="primary">IAM & Role Builder</Button>
+                <Link
+                  to="/app/documents"
+                  className="text-xs text-accent hover:underline flex items-center gap-1 font-medium pt-1"
+                >
+                  <span>View catalog</span>
+                  <ArrowRight className="h-3 w-3" />
                 </Link>
               </div>
+            </section>
+          )}
 
-              <div className="grid gap-4 sm:grid-cols-2 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Role Assignment & Governance</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Assign fine-grained permission keys across 12 system and custom tenant roles.
-                  </p>
-                  <Link to="/app/users-and-roles" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Open Role Matrix →
+          {/* 4. Quick Actions Row (Role-Gated, No Duplication) */}
+          {(canUpload || canAssign || canSimulate || canRunTests) && (
+            <section aria-label="Quick actions" className="rounded-xl border border-line bg-surface p-5 shadow-xs">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xs uppercase tracking-wider text-muted font-mono font-semibold">
+                  Quick Actions
+                </h2>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {canUpload && (
+                  <Link
+                    to="/app/documents"
+                    className="group flex items-center gap-3 rounded-lg border border-line bg-surface-subtle/50 p-3 hover:border-ink hover:bg-surface transition-all shadow-xs"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-ink text-white">
+                      <Upload className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-semibold text-ink group-hover:text-accent block">
+                        Upload document
+                      </span>
+                      <span className="text-[0.7rem] text-muted truncate block">
+                        Add to knowledge base
+                      </span>
+                    </div>
                   </Link>
-                </div>
+                )}
 
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Access Approvals Queue</p>
-                  <p className="mt-1 text-xs text-muted">
-                    {stats.pending_requests_count} pending access requests requiring clearance or role elevation review.
-                  </p>
-                  <Link to="/app/access-requests" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Review Access Requests ({stats.pending_requests_count}) →
+                {(canAssign || isAdmin) && (
+                  <Link
+                    to="/app/access-requests"
+                    className="group flex items-center gap-3 rounded-lg border border-line bg-surface-subtle/50 p-3 hover:border-ink hover:bg-surface transition-all shadow-xs"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-ink text-white">
+                      <KeyRound className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-semibold text-ink group-hover:text-accent block">
+                        Review requests
+                      </span>
+                      <span className="text-[0.7rem] text-muted truncate block">
+                        {stats.pending_requests_count ?? 0} waiting approval
+                      </span>
+                    </div>
                   </Link>
-                </div>
+                )}
+
+                {canSimulate && (
+                  <Link
+                    to="/app/simulator"
+                    className="group flex items-center gap-3 rounded-lg border border-line bg-surface-subtle/50 p-3 hover:border-ink hover:bg-surface transition-all shadow-xs"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-ink text-white">
+                      <SlidersHorizontal className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-semibold text-ink group-hover:text-accent block">
+                        Check access
+                      </span>
+                      <span className="text-[0.7rem] text-muted truncate block">
+                        Test who can see what
+                      </span>
+                    </div>
+                  </Link>
+                )}
+
+                {canRunTests && (
+                  <Link
+                    to="/app/security"
+                    className="group flex items-center gap-3 rounded-lg border border-line bg-surface-subtle/50 p-3 hover:border-ink hover:bg-surface transition-all shadow-xs"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-ink text-white">
+                      <ShieldCheck className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-semibold text-ink group-hover:text-accent block">
+                        Run security checks
+                      </span>
+                      <span className="text-[0.7rem] text-muted truncate block">
+                        Verify 17 attack tests
+                      </span>
+                    </div>
+                  </Link>
+                )}
               </div>
             </section>
           )}
 
-          {/* 5. DOCUMENT MANAGER */}
-          {isDocManager && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Document Ingestion & Quarantine Hub</h2>
-                  <p className="text-xs text-muted">Ingest PDFs, Scans, Excel files, and inspect files flagged for indirect prompt injection.</p>
-                </div>
-                <Link to="/app/documents">
-                  <Button kind="primary">Document Catalog</Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Quarantine & Flagged Content</p>
-                  <p className="mt-1 text-xs text-muted">
-                    {stats.document_status_counts?.flagged || 0} documents quarantined for potential prompt injection review.
-                  </p>
-                  <Link to="/app/documents" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Inspect Flagged Files →
-                  </Link>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Access Grants Management</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Configure document-level access grants (Role, Everyone, or Individual User).
-                  </p>
-                  <Link to="/app/documents" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Manage Document Grants →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 6. SECURITY AUDITOR */}
-          {isAuditor && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Security Posture & Compliance Explorer</h2>
-                  <p className="text-xs text-muted">Zero-trust audit telemetry, attack regression suite, and compliance bundle exports.</p>
-                </div>
-                <Link to="/app/security">
-                  <Button kind="primary">Security & Audit Suite</Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">24-Hour Access Denials</p>
-                  <p className="text-2xl font-semibold text-ink mt-1">{stats.denials_24h}</p>
-                  <p className="text-[0.7rem] text-muted">Blocked by SQL authorization pre-inference</p>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">SOC2 / ISO27001 Audit Export</p>
-                  <p className="mt-1 text-xs text-muted">Export tamper-evident JSON and CSV audit trails.</p>
-                  <a href="/api/audit/export?format=csv" download className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Download CSV Audit Log ↓
-                  </a>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Live Attack Runner</p>
-                  <p className="mt-1 text-xs text-muted">Verify SQL permission filters against adversarial queries.</p>
-                  <Link to="/app/security" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Run Attack Verification →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 7. DEPARTMENT MANAGER & TEAM LEAD */}
-          {(isDeptManager || isTeamLead) && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">
-                    {stats.department?.name || user.department_id || "Department"} Team Operations
-                  </h2>
-                  <p className="text-xs text-muted">Department personnel oversight, knowledge boundaries, and delegated access requests.</p>
-                </div>
-                <Link to="/app/department-insights">
-                  <Button kind="primary">Department Dashboard</Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Team Members</p>
-                  <p className="text-2xl font-semibold text-ink mt-1">{stats.department?.members_count || 1}</p>
-                  <p className="text-[0.7rem] text-muted">Assigned to this organizational unit</p>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Delegated Access Requests</p>
-                  <p className="mt-1 text-xs text-muted">Request project-specific document access on behalf of team members.</p>
-                  <Link to="/app/access-requests" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Delegate Access Request →
-                  </Link>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Department Knowledge Base</p>
-                  <p className="mt-1 text-xs text-muted">Review docs curated for this department's technical workflows.</p>
-                  <Link to="/app/department-insights" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    View Department Docs →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 8. HR SPECIALIST */}
-          {isHr && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Human Resources & Confidential Personnel Hub</h2>
-                  <p className="text-xs text-muted">Level 3 Restricted compensation records, employee lifecycle, and policy Q&A.</p>
-                </div>
-                <div className="flex gap-2">
-                  <Link to="/app/users-and-roles">
-                    <Button kind="secondary">Employee Lifecycle</Button>
-                  </Link>
-                  <Link to="/app/documents">
-                    <Button kind="primary">Restricted HR Vault</Button>
-                  </Link>
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Restricted Level 3 Compensation Vault</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Salary Bands 2026 and confidential HR compensation documents protected with Level 3 Restricted clearance.
-                  </p>
-                  <Link to="/app/ask" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Ask HR AI (Restricted L3) →
-                  </Link>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Employee Onboarding & Clearances</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Provision new employee profiles, assign default clearance, and link department access.
-                  </p>
-                  <Link to="/app/users-and-roles" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Manage Employees ({stats.total_users}) →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 9. FINANCE SPECIALIST */}
-          {isFinance && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Financial Intelligence & Invoice Audit</h2>
-                  <p className="text-xs text-muted">Confidential Level 2 Revenue Reports, scanned supplier invoices, and fiscal audits.</p>
-                </div>
-                <Link to="/app/ask">
-                  <Button kind="primary">Query Financial Data</Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Confidential Financial Reports</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Access FY2025 Revenue Report and balance sheets with exact table and page-level citations.
-                  </p>
-                  <Link to="/app/ask" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Ask: "What was our FY2025 revenue and breakdown?" →
-                  </Link>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Scanned Invoices & Multimodal OCR</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Inspect scanned vendor invoices with side-by-side original image previews.
-                  </p>
-                  <Link to="/app/documents" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    View Scanned Invoices →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 10. ENGINEERING SPECIALIST */}
-          {isEngineering && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Platform Architecture & Technical Specifications</h2>
-                  <p className="text-xs text-muted">System topologies, database schemas, code-level access rules, and API contracts.</p>
-                </div>
-                <Link to="/app/ask">
-                  <Button kind="primary">Ask Technical AI</Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Architecture Overview & Specs</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Query platform architectures, database models, and authorization clauses with syntax highlighting.
-                  </p>
-                  <Link to="/app/ask" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Ask: "How is database-level access control enforced?" →
-                  </Link>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Cross-Functional Document Access</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Need finance APIs or restricted specs for integration? Submit 1-click access requests.
-                  </p>
-                  <Link to="/app/access-requests" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Request Integration Access →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 11. EXECUTIVE / VP */}
-          {isExecutive && (
-            <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="display text-xl font-semibold text-ink">Executive Strategic Intelligence Hub</h2>
-                  <p className="text-xs text-muted">Cross-departmental strategic synthesis across Finance, Engineering, and Operations.</p>
-                </div>
-                <Link to="/app/ask">
-                  <Button kind="primary">Launch Executive Briefing Q&A</Button>
-                </Link>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 pt-2">
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Executive Briefing Mode</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Synthesize complex multi-page reports into structured memos: Executive Summary, Key Findings, and Financial Impact.
-                  </p>
-                  <Link to="/app/ask" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Open Strategic Q&A →
-                  </Link>
-                </div>
-                <div className="rounded-lg border border-line/80 bg-bg p-4">
-                  <p className="text-xs font-semibold text-ink">Confidential Knowledge Assets</p>
-                  <p className="mt-1 text-xs text-muted">
-                    Full Level 2 Confidential clearance across corporate revenue, platform architecture, and operational roadmaps.
-                  </p>
-                  <Link to="/app/documents" className="mt-3 block text-xs text-accent underline underline-offset-2">
-                    Explore Confidential Catalog →
-                  </Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* 12. STANDARD EMPLOYEE QUICK STARTERS */}
-          <section className="space-y-4 rounded-xl border border-line bg-surface p-6">
-            <h2 className="display text-xl font-semibold text-ink">Quick Knowledge Starters</h2>
-            <p className="text-xs text-muted">Click any prompt to instantly query company documents with cited sources:</p>
-
-            <div className="grid gap-3 sm:grid-cols-3 pt-2">
-              <Link
-                to="/app/ask"
-                className="group rounded-lg border border-line/80 bg-bg p-4 hover:border-accent hover:shadow-xs transition-all"
-              >
-                <p className="text-xs font-medium text-ink group-hover:text-accent">
-                  "How many days of annual leave do employees get?"
+          {/* 5. "Try Asking" Starter Queries */}
+          <section aria-label="Suggested questions" className="rounded-xl border border-line bg-surface p-6 shadow-xs">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="display text-xl font-semibold text-ink">Try asking</h2>
+                <p className="text-xs text-muted">
+                  Click any starter prompt to query your authorized documents:
                 </p>
-                <p className="mt-1 text-[0.7rem] text-muted">Cites: Leave Policy (L1 Internal)</p>
-              </Link>
+              </div>
+            </div>
 
-              <Link
-                to="/app/ask"
-                className="group rounded-lg border border-line/80 bg-bg p-4 hover:border-accent hover:shadow-xs transition-all"
-              >
-                <p className="text-xs font-medium text-ink group-hover:text-accent">
-                  "What are the steps for IT equipment setup and VPN?"
-                </p>
-                <p className="mt-1 text-[0.7rem] text-muted">Cites: IT Onboarding Notes (L1 Internal)</p>
-              </Link>
-
-              <Link
-                to="/app/access-requests"
-                className="group rounded-lg border border-line/80 bg-bg p-4 hover:border-accent hover:shadow-xs transition-all"
-              >
-                <p className="text-xs font-medium text-ink group-hover:text-accent">
-                  Need access to a restricted document?
-                </p>
-                <p className="mt-1 text-[0.7rem] text-muted">Submit an access request with business justification</p>
-              </Link>
+            <div className="grid gap-3 sm:grid-cols-3 pt-1">
+              {starterQueries.map((q, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => navigate(`/app/ask?q=${encodeURIComponent(q)}`)}
+                  className="group flex flex-col justify-between text-left rounded-lg border border-line bg-surface-subtle/60 p-3.5 hover:border-accent hover:bg-surface hover:shadow-xs transition-all"
+                >
+                  <p className="text-xs font-medium text-ink group-hover:text-accent leading-relaxed">
+                    "{q}"
+                  </p>
+                  <div className="mt-2 flex items-center justify-between text-[0.7rem] text-muted">
+                    <span>Ask AI</span>
+                    <ArrowRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </button>
+              ))}
             </div>
           </section>
+
+          {/* 6. Pinned Scroll Section: "How your answer is protected" */}
+          <PinnedSteps />
         </motion.div>
       )}
     </div>
