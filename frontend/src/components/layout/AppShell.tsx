@@ -18,6 +18,7 @@ import {
   X,
   ChevronDown,
   ShieldAlert,
+  Globe,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
@@ -99,56 +100,54 @@ export function AppShell() {
   const isTeamLead = roles.includes("team_lead");
   const isHr = roles.includes("hr");
 
-  // Navigation Groups Definition (Role-Aware)
+  // Navigation Groups Definition (Clean & Role-Aware)
   const navGroups: NavGroup[] = [];
 
-  // Group 1: Core Workspace
+  // Group 1: Workspace
   const workspaceItems: NavItem[] = [
     { path: "dashboard", label: "Home", icon: LayoutDashboard },
     { path: "ask", label: "Ask AI", icon: Sparkles },
+    { path: "documents", label: "Documents", icon: FileText },
   ];
   navGroups.push({ label: "Workspace", items: workspaceItems });
 
-  // Group 2: Knowledge Base
-  const knowledgeItems: NavItem[] = [
-    { path: "documents", label: "Documents", icon: FileText },
-    {
-      path: "access-requests",
-      label: "Access Requests",
-      icon: KeyRound,
-      badge: pendingRequestsCount > 0 ? pendingRequestsCount : undefined,
-    },
-  ];
-  navGroups.push({ label: "Knowledge", items: knowledgeItems });
-
-  // Group 3: Administration (Role-gated)
-  const adminItems: NavItem[] = [];
+  // Group 2: Management (Role-Gated)
+  const managementItems: NavItem[] = [];
+  if (isAdmin || isIamAdmin || isOwner || perms.has("role.manage")) {
+    managementItems.push({ path: "roles-hub", label: "Role Portals", icon: Globe });
+  }
   if (isAdmin || isIamAdmin || isOwner || isHr || perms.has("user.invite") || perms.has("role.manage")) {
-    adminItems.push({ path: "users-and-roles", label: "People & Roles", icon: Users });
+    managementItems.push({ path: "users-and-roles", label: "Team & Roles", icon: Users });
   }
+  managementItems.push({
+    path: "access-requests",
+    label: "Access Requests",
+    icon: KeyRound,
+    badge: pendingRequestsCount > 0 ? pendingRequestsCount : undefined,
+  });
   if (isAdmin || isIamAdmin || isOwner || isDeptManager || isTeamLead) {
-    adminItems.push({ path: "department-insights", label: "Departments", icon: Building2 });
+    managementItems.push({ path: "department-insights", label: "Departments", icon: Building2 });
   }
-  if (isAdmin || isOwner || isPlatformAdmin) {
-    adminItems.push({ path: "settings", label: "Organization Settings", icon: Settings });
-  }
-  if (adminItems.length > 0) {
-    navGroups.push({ label: "Administration", items: adminItems });
+  if (managementItems.length > 0) {
+    navGroups.push({ label: "Management", items: managementItems });
   }
 
-  // Group 4: Security & Platform (Role-gated)
-  const securityItems: NavItem[] = [];
-  if (isAdmin || isIamAdmin || perms.has("policy.simulate")) {
-    securityItems.push({ path: "simulator", label: "Policy Simulator", icon: SlidersHorizontal });
+  // Group 3: System & Security (Role-Gated)
+  const systemItems: NavItem[] = [];
+  if (isAdmin || isOwner || isPlatformAdmin) {
+    systemItems.push({ path: "settings", label: "Settings", icon: Settings });
   }
   if (isAdmin || isAuditor || isPlatformAdmin || perms.has("audit.read")) {
-    securityItems.push({ path: "security", label: "Audit & Security", icon: ShieldCheck });
+    systemItems.push({ path: "security", label: "Security & Audit", icon: ShieldCheck });
+  }
+  if (isAdmin || isIamAdmin || perms.has("policy.simulate")) {
+    systemItems.push({ path: "simulator", label: "Simulator", icon: SlidersHorizontal });
   }
   if (isPlatformAdmin) {
-    securityItems.push({ path: "platform", label: "Platform Ops", icon: Cpu });
+    systemItems.push({ path: "platform", label: "Platform Ops", icon: Cpu });
   }
-  if (securityItems.length > 0) {
-    navGroups.push({ label: "Security & Operations", items: securityItems });
+  if (systemItems.length > 0) {
+    navGroups.push({ label: "System", items: systemItems });
   }
 
   // Get user initials
@@ -167,21 +166,34 @@ export function AppShell() {
         <div className="flex h-screen w-full overflow-hidden bg-page text-ink font-sans">
           {/* Mobile Top App Bar (<1024px) */}
           <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex h-14 items-center justify-between border-b border-line bg-surface px-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <button
                 type="button"
                 onClick={() => setMobileOpen(!mobileOpen)}
                 aria-label="Toggle Navigation"
-                className="rounded-lg p-1.5 text-muted hover:bg-surface-hover hover:text-ink"
+                className="rounded-lg p-1.5 text-muted hover:bg-surface-hover hover:text-ink shrink-0"
               >
                 {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </button>
-              <Link to="/app/dashboard" className="display text-xl font-semibold tracking-tight text-ink">
-                AegisRAG
+              <Link to="/app/dashboard" className="flex items-center gap-2 min-w-0">
+                {user.tenant_logo ? (
+                  <img
+                    src={user.tenant_logo}
+                    alt={user.tenant || "Logo"}
+                    className="h-6 w-6 rounded-md object-contain shrink-0"
+                  />
+                ) : (
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-ink text-white font-mono text-[0.65rem] font-bold">
+                    {(user.tenant || "HQ").slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <span className="display text-base font-semibold tracking-tight text-ink truncate">
+                  {user.tenant || "Enterprise Workspace"}
+                </span>
               </Link>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <ClearancePill clearance={user.clearance} label={user.clearance_label} />
               <button
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
@@ -209,16 +221,26 @@ export function AppShell() {
           >
             {/* Sidebar Brand Header */}
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-5">
-              <Link to="/app/dashboard" className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-ink text-white font-mono text-xs font-bold shadow-xs">
-                  Æ
-                </div>
-                <div className="min-w-0">
-                  <span className="display text-xl font-semibold tracking-tight text-ink block leading-none">
-                    AegisRAG
+              <Link to="/app/dashboard" className="flex items-center gap-2.5 min-w-0">
+                {user.tenant_logo ? (
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-subtle border border-line p-1 shadow-xs overflow-hidden">
+                    <img
+                      src={user.tenant_logo}
+                      alt={user.tenant || "Company Logo"}
+                      className="h-full w-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-ink text-white font-bold text-xs shadow-xs">
+                    {(user.tenant || "HQ").slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <span className="display text-sm font-bold tracking-tight text-ink block leading-tight truncate">
+                    {user.tenant || "Enterprise Workspace"}
                   </span>
-                  <span className="text-[0.7rem] font-mono text-muted truncate block mt-0.5">
-                    {user.tenant || "Global Platform"}
+                  <span className="text-[0.65rem] font-mono text-muted uppercase tracking-wider block mt-0.5 truncate">
+                    {user.tenant_category ? `${user.tenant_category} Workspace` : "Verified Portal"}
                   </span>
                 </div>
               </Link>
@@ -227,7 +249,7 @@ export function AppShell() {
               <button
                 type="button"
                 onClick={() => setMobileOpen(false)}
-                className="lg:hidden rounded-lg p-1 text-muted hover:bg-surface-hover hover:text-ink"
+                className="lg:hidden rounded-lg p-1 text-muted hover:bg-surface-hover hover:text-ink shrink-0"
               >
                 <X className="h-5 w-5" />
               </button>

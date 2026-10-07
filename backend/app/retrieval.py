@@ -80,4 +80,15 @@ def search(db: Session, user: User, query: str, top_k: int | None = None) -> lis
         .where(Chunk.id.in_(best), allowed)
     ).all()
     by_id = {chunk.id: Hit(chunk, document) for chunk, document in rows}
-    return [by_id[i] for i in best if i in by_id]
+    
+    user_roles_set = set(user.role_names) | {r.slug for r in user.roles if r.slug} | {r.id for r in user.roles}
+    results = []
+    for i in best:
+        if i in by_id:
+            hit = by_id[i]
+            # Enforce section-level role ACL if restricted
+            if hit.chunk.allowed_roles and not user.is_admin and not user.is_platform_admin:
+                if not any(r in user_roles_set for r in hit.chunk.allowed_roles):
+                    continue
+            results.append(hit)
+    return results

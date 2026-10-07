@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app import audit, chat, ingestion, page_renderer, retrieval
 from app.auth import (
@@ -162,13 +163,58 @@ class TenantCreateIn(BaseModel):
     name: str
 
 
+from app.industry_templates import INDUSTRY_CATEGORIES, slugify
+
+
 class TenantStatusIn(BaseModel):
     status: str  # active | suspended
 
 
 class TenantSettingsIn(BaseModel):
     name: str | None = None
+    website: str | None = None
+    logo_url: str | None = None
+    industry_category: str | None = None
+    primary_color: str | None = None
     settings: dict = {}
+
+
+class RegisterCompanyIn(BaseModel):
+    founder_name: str = Field(min_length=2, max_length=100)
+    company_name: str = Field(min_length=2, max_length=100)
+    business_email: str = Field(min_length=5, max_length=150)
+    password: str = Field(min_length=6, max_length=100)
+    company_website: str | None = None
+    website: str | None = None
+    company_logo: str | None = None
+    logo_url: str | None = None
+    company_category: str = Field(default="healthcare")
+    custom_roles: list[dict | str] | None = None
+
+
+class PortalLoginIn(BaseModel):
+    company_slug: str
+    role_slug: str
+    email: str
+    password: str
+
+
+class AddCustomRoleIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    description: str = Field(default="")
+    default_clearance: int = Field(default=1, ge=0, le=3)
+    permissions: list[str] = Field(default_factory=list)
+
+
+class AssignRoleUserIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: str = Field(min_length=3, max_length=150)
+    password: str = Field(min_length=6, max_length=100)
+    clearance: int | None = Field(default=None, ge=0, le=3)
+
+
+class SectionAccessIn(BaseModel):
+    allowed_roles: list[str] = Field(default_factory=list)
 
 
 class SupportAccessIn(BaseModel):
@@ -187,6 +233,11 @@ def user_out(u: User, dept_map: dict | None = None) -> dict:
         "email": u.email,
         "tenant": u.tenant.name if u.tenant else "",
         "tenant_id": u.tenant_id,
+        "tenant_slug": u.tenant.slug if u.tenant else "",
+        "tenant_logo": u.tenant.logo_url if u.tenant else None,
+        "tenant_category": u.tenant.industry_category if u.tenant else "general",
+        "tenant_website": u.tenant.website if u.tenant else None,
+        "tenant_primary_color": u.tenant.primary_color if u.tenant else "#10b981",
         "roles": u.role_names,
         "clearance": u.clearance,
         "clearance_label": LEVELS[u.clearance] if 0 <= u.clearance < len(LEVELS) else "Unknown",
@@ -214,6 +265,8 @@ def doc_out(d: Document, with_access: bool = False, labels: dict | None = None) 
         "version": d.version,
         "checksum": d.checksum,
         "created_at": iso(d.created_at),
+        "sections_metadata": d.sections_metadata or [],
+        "data_schema": d.data_schema,
     }
     if with_access:
         labels = labels or {}
@@ -297,6 +350,396 @@ def login(body: LoginIn, db: Session = Depends(get_db)) -> dict:
     db.commit()
     audit.log(db, user.tenant_id, user.id, "auth.login", "allowed")
     return {"token": make_token(user), "user": user_out(user)}
+
+
+# ---------- SaaS Onboarding & Dedicated Role Portals ----------
+
+DISALLOWED_CONSUMER_DOMAINS = {
+    "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "rocketmail.com",
+    "hotmail.com", "outlook.com", "live.com", "msn.com", "icloud.com", "me.com",
+    "mac.com", "aol.com", "mail.com", "proton.me", "protonmail.com", "zoho.com",
+}
+
+
+def validate_business_email(email: str) -> None:
+    clean = email.strip().lower()
+    if "@" not in clean:
+        raise HTTPException(400, "Please provide a valid business email address.")
+    parts = clean.split("@")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise HTTPException(400, "Please provide a valid business email address.")
+    domain = parts[1]
+    if domain in DISALLOWED_CONSUMER_DOMAINS:
+        raise HTTPException(
+            400,
+            f"Registration requires a business email ID (e.g. user@company.business.com or company domain). Consumer email domains (@{domain}) are not permitted."
+        )
+
+
+@router.get("/public/categories")
+def get_public_categories() -> list[dict]:
+    """Returns all 6 enterprise SaaS industry templates with their tailored roles."""
+    return list(INDUSTRY_CATEGORIES.values())
+
+
+@router.post("/auth/register-company")
+def register_company(body: RegisterCompanyIn, db: Session = Depends(get_db)):
+    """Self-serve company SaaS registration. Provisions tenant, creates specialized industry roles, founder account, and returns authenticated session."""
+    validate_business_email(body.business_email)
+
+    existing_user = db.execute(select(User).where(User.email == body.business_email.lower().strip())).scalar_one_or_none()
+    if existing_user:
+        raise HTTPException(400, "An account with this business email already exists. Please sign in.")
+
+    base_slug = slugify(body.company_name)
+    slug = base_slug
+    counter = 1
+    while db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+
+    existing_tenant = db.execute(select(Tenant).where(func.lower(Tenant.name) == body.company_name.lower())).scalar_one_or_none()
+    if existing_tenant:
+        raise HTTPException(400, "A company with this name has already been registered.")
+
+    cat_key = body.company_category.lower()
+    category_template = INDUSTRY_CATEGORIES.get(cat_key, INDUSTRY_CATEGORIES["healthcare"])
+
+    tenant = Tenant(
+        name=body.company_name.strip(),
+        slug=slug,
+        industry_category=cat_key,
+        website=(body.website or body.company_website or "").strip() or None,
+        logo_url=body.logo_url or body.company_logo or None,
+        primary_color=category_template.get("color", "#10b981"),
+        status="active",
+        settings={
+            "tier": "Enterprise SaaS Pro",
+            "industry": category_template["name"],
+            "badge": category_template["badge"],
+            "created_via": "self_serve_onboarding",
+        },
+    )
+    db.add(tenant)
+    db.flush()
+
+    owner_role = Role(
+        tenant_id=tenant.id,
+        name="organization_owner",
+        slug="owner",
+        description="Organization founder and chief executive administrator.",
+        default_clearance=3,
+        scope="tenant",
+        is_system=True,
+        permission_keys=ALL_PERMISSIONS,
+    )
+    admin_role = Role(
+        tenant_id=tenant.id,
+        name="admin",
+        slug="admin",
+        description="System administrator with full operational access.",
+        default_clearance=2,
+        scope="tenant",
+        is_system=True,
+        permission_keys=ALL_PERMISSIONS,
+    )
+    db.add_all([owner_role, admin_role])
+
+    for r_spec in category_template["roles"]:
+        new_r = Role(
+            tenant_id=tenant.id,
+            name=r_spec["name"],
+            slug=r_spec["slug"],
+            description=r_spec["description"],
+            default_clearance=r_spec["default_clearance"],
+            scope="tenant",
+            is_system=False,
+            permission_keys=r_spec.get("permissions", []),
+        )
+        db.add(new_r)
+
+    if body.custom_roles:
+        for cr in body.custom_roles:
+            c_name = cr.get("name") if isinstance(cr, dict) else str(cr).strip()
+            if c_name:
+                custom_slug = slugify(c_name)
+                c_desc = cr.get("description", f"Specialized {c_name} role.") if isinstance(cr, dict) else f"Specialized {c_name} role."
+                c_clearance = cr.get("default_clearance", 1) if isinstance(cr, dict) else 1
+                c_perms = cr.get("permissions", ["document.metadata.read", "document.content.read", "chat.use", "chat.history.read_own"]) if isinstance(cr, dict) else ["document.metadata.read", "document.content.read", "chat.use", "chat.history.read_own"]
+                c_role = Role(
+                    tenant_id=tenant.id,
+                    name=c_name,
+                    slug=custom_slug,
+                    description=c_desc,
+                    default_clearance=c_clearance,
+                    scope="tenant",
+                    is_system=False,
+                    permission_keys=c_perms,
+                )
+                db.add(c_role)
+
+    dept_name = "Clinical Operations" if cat_key == "healthcare" else "Operations"
+    dept = Department(tenant_id=tenant.id, name=dept_name)
+    db.add(dept)
+    db.flush()
+
+    user = User(
+        tenant_id=tenant.id,
+        name=body.founder_name.strip(),
+        email=body.business_email.lower().strip(),
+        password_hash=hash_password(body.password),
+        clearance=3,
+        active=True,
+        status="active",
+        department_id=dept.id,
+        roles=[owner_role, admin_role],
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    db.refresh(tenant)
+
+    audit.log(
+        db,
+        tenant.id,
+        user.id,
+        "tenant.register",
+        "allowed",
+        company_name=tenant.name,
+        slug=tenant.slug,
+        category=cat_key,
+    )
+
+    token = make_token(user)
+    return {
+        "token": token,
+        "user": user_out(user, {dept.id: dept.name}),
+        "tenant": {
+            "id": tenant.id,
+            "name": tenant.name,
+            "slug": tenant.slug,
+            "category": tenant.industry_category,
+            "website": tenant.website,
+            "logo_url": tenant.logo_url,
+            "primary_color": tenant.primary_color,
+        },
+    }
+
+
+@router.get("/public/portal-info/{company_slug}/{role_slug}")
+def get_role_portal_info(company_slug: str, role_slug: str, db: Session = Depends(get_db)):
+    """Public endpoint to load company branding and role credentials card for role portal URL."""
+    tenant = db.execute(select(Tenant).where(Tenant.slug == company_slug.lower(), Tenant.status == "active")).scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(404, "Company workspace not found.")
+
+    role = db.execute(
+        select(Role).where(
+            Role.tenant_id == tenant.id,
+            or_(
+                Role.slug == role_slug.lower(),
+                func.lower(Role.name) == role_slug.replace("-", " ").lower(),
+                func.lower(Role.name) == role_slug.lower(),
+            ),
+        )
+    ).scalar_one_or_none()
+    if not role:
+        raise HTTPException(404, "Role portal not found for this company.")
+
+    all_users = db.execute(select(User).where(User.tenant_id == tenant.id, User.active == True)).scalars().all()
+    users_in_role = sum(1 for u in all_users if role in u.roles)
+
+    return {
+        "company_id": tenant.id,
+        "company_name": tenant.name,
+        "company_slug": tenant.slug,
+        "company_logo": tenant.logo_url,
+        "company_website": tenant.website,
+        "company_category": tenant.industry_category,
+        "company_color": tenant.primary_color or "#10b981",
+        "role_id": role.id,
+        "role_name": role.name,
+        "role_slug": role.slug,
+        "role_description": role.description,
+        "clearance": role.default_clearance,
+        "clearance_label": LEVELS[role.default_clearance] if 0 <= role.default_clearance < len(LEVELS) else "Internal",
+        "users_count": users_in_role,
+    }
+
+
+@router.post("/public/portal-login")
+def portal_login(body: PortalLoginIn, db: Session = Depends(get_db)):
+    """Authenticates user through their role-specific company portal URL."""
+    tenant = db.execute(select(Tenant).where(Tenant.slug == body.company_slug.lower(), Tenant.status == "active")).scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(404, "Company workspace not found.")
+
+    role = db.execute(
+        select(Role).where(
+            Role.tenant_id == tenant.id,
+            or_(
+                Role.slug == body.role_slug.lower(),
+                func.lower(Role.name) == body.role_slug.replace("-", " ").lower(),
+                func.lower(Role.name) == body.role_slug.lower(),
+            ),
+        )
+    ).scalar_one_or_none()
+    if not role:
+        raise HTTPException(404, "Role portal not found.")
+
+    user = db.execute(select(User).where(User.tenant_id == tenant.id, User.email == body.email.lower().strip())).scalar_one_or_none()
+    if not user or not user.active or user.status == "deactivated" or not verify_password(body.password, user.password_hash):
+        raise HTTPException(401, "Invalid email or password.")
+
+    user_role_ids = {r.id for r in user.roles}
+    is_privileged = user.is_admin or user.is_platform_admin or ("organization_owner" in user.role_names)
+    if role.id not in user_role_ids and not is_privileged:
+        raise HTTPException(403, f"Your credentials are valid, but your account does not hold the '{role.name}' role in {tenant.name}.")
+
+    user.last_login_at = now()
+    db.commit()
+
+    dept_map = {d.id: d.name for d in db.execute(select(Department).where(Department.tenant_id == tenant.id)).scalars()}
+    audit.log(db, tenant.id, user.id, "auth.portal_login", "allowed", role_slug=role.slug, company_slug=tenant.slug)
+    return {"token": make_token(user), "user": user_out(user, dept_map)}
+
+
+@router.get("/tenant/roles-hub")
+def get_tenant_roles_hub(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Returns all roles configured for this company, with direct portal links and assigned members."""
+    tenant = user.tenant
+    roles = db.execute(select(Role).where(Role.tenant_id == tenant.id).order_by(Role.name)).scalars().all()
+    all_users = db.execute(select(User).where(User.tenant_id == tenant.id)).scalars().all()
+
+    result = []
+    for r in roles:
+        assigned = [
+            {
+                "id": u.id,
+                "name": u.name,
+                "email": u.email,
+                "clearance": u.clearance,
+                "clearance_label": LEVELS[u.clearance] if 0 <= u.clearance < len(LEVELS) else "Internal",
+                "status": u.status,
+                "is_admin": u.is_admin,
+            }
+            for u in all_users if r in u.roles
+        ]
+        portal_slug = r.slug or slugify(r.name)
+        portal_url = f"/portal/{tenant.slug}/{portal_slug}"
+        result.append({
+            "id": r.id,
+            "name": r.name,
+            "slug": portal_slug,
+            "description": r.description,
+            "default_clearance": r.default_clearance,
+            "clearance_label": LEVELS[r.default_clearance] if 0 <= r.default_clearance < len(LEVELS) else "Internal",
+            "is_system": r.is_system,
+            "portal_url": portal_url,
+            "assigned_count": len(assigned),
+            "users": assigned,
+            "permissions": r.permission_keys or [],
+        })
+    return {
+        "company_name": tenant.name,
+        "company_slug": tenant.slug,
+        "company_category": tenant.industry_category,
+        "company_logo": tenant.logo_url,
+        "roles": result,
+    }
+
+
+@router.post("/tenant/roles")
+def add_custom_role(
+    body: AddCustomRoleIn,
+    user: User = Depends(require_any_permission("role.manage", "tenant.manage")),
+    db: Session = Depends(get_db),
+):
+    """Allows company owner/admin to add an extra custom role."""
+    clean_name = body.name.strip()
+    slug = slugify(clean_name)
+
+    existing = db.execute(
+        select(Role).where(Role.tenant_id == user.tenant_id, or_(func.lower(Role.name) == clean_name.lower(), Role.slug == slug))
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, "A role with this name or slug already exists.")
+
+    new_role = Role(
+        tenant_id=user.tenant_id,
+        name=clean_name,
+        slug=slug,
+        description=body.description.strip(),
+        default_clearance=body.default_clearance,
+        scope="tenant",
+        is_system=False,
+        permission_keys=body.permissions or ["document.metadata.read", "document.content.read", "chat.use", "chat.history.read_own"],
+    )
+    db.add(new_role)
+    db.commit()
+    db.refresh(new_role)
+
+    audit.log(db, user.tenant_id, user.id, "role.create", "allowed", role_id=new_role.id, name=new_role.name, slug=new_role.slug)
+    return {
+        "id": new_role.id,
+        "name": new_role.name,
+        "slug": new_role.slug,
+        "description": new_role.description,
+        "default_clearance": new_role.default_clearance,
+        "portal_url": f"/portal/{user.tenant.slug}/{new_role.slug}",
+    }
+
+
+@router.post("/tenant/roles/{role_id}/assign-user")
+def assign_role_user(
+    role_id: str,
+    body: AssignRoleUserIn,
+    user: User = Depends(require_any_permission("user.invite", "role.manage", "tenant.manage")),
+    db: Session = Depends(get_db),
+):
+    """Creates or assigns an employee user to a specific role with name, username/email, and password."""
+    role = db.get(Role, role_id)
+    if not role or role.tenant_id != user.tenant_id:
+        raise HTTPException(404, "Role not found.")
+
+    target_email = body.email.lower().strip()
+    existing_user = db.execute(select(User).where(User.tenant_id == user.tenant_id, User.email == target_email)).scalar_one_or_none()
+
+    if existing_user:
+        if body.password:
+            existing_user.password_hash = hash_password(body.password)
+        if role not in existing_user.roles:
+            existing_user.roles.append(role)
+        if body.clearance is not None:
+            existing_user.clearance = max(existing_user.clearance, body.clearance)
+        db.commit()
+        db.refresh(existing_user)
+        target = existing_user
+    else:
+        target = User(
+            tenant_id=user.tenant_id,
+            name=body.name.strip(),
+            email=target_email,
+            password_hash=hash_password(body.password),
+            clearance=body.clearance if body.clearance is not None else role.default_clearance,
+            active=True,
+            status="active",
+            created_by=user.id,
+            roles=[role],
+        )
+        db.add(target)
+        db.commit()
+        db.refresh(target)
+
+    audit.log(db, user.tenant_id, user.id, "user.assign_role", "allowed", target_user_id=target.id, role_id=role.id, role_name=role.name)
+    return {
+        "id": target.id,
+        "name": target.name,
+        "email": target.email,
+        "clearance": target.clearance,
+        "roles": target.role_names,
+        "status": target.status,
+    }
 
 
 @router.get("/auth/demo-users")
@@ -807,6 +1250,135 @@ def update_access(
     return doc_out(doc, True, _labels(db, actor.tenant_id))
 
 
+@router.get("/documents/{document_id}/sections")
+def get_document_sections(
+    document_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Returns extracted headings and sections for a PDF or database records document."""
+    doc = _tenant_document(db, user, document_id)
+    normalized_sections = [
+        {
+            "id": s.get("id") or s.get("section_id"),
+            "section_id": s.get("section_id") or s.get("id"),
+            "heading": s.get("heading", ""),
+            "level": s.get("level", 1),
+            "page": s.get("page", 1),
+            "preview": s.get("snippet", s.get("preview", "")),
+            "snippet": s.get("snippet", s.get("preview", "")),
+            "allowed_roles": s.get("allowed_roles", []),
+        }
+        for s in (doc.sections_metadata or [])
+    ]
+    return {
+        "document_id": doc.id,
+        "title": doc.title,
+        "kind": doc.kind,
+        "sections": normalized_sections,
+        "data_schema": doc.data_schema,
+    }
+
+
+@router.put("/documents/{document_id}/sections/{section_id}/access")
+def update_section_access(
+    document_id: str,
+    section_id: str,
+    body: SectionAccessIn,
+    user: User = Depends(require_any_permission("document.grant.manage", "tenant.manage")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Assigns or updates role access on a specific extracted section/heading."""
+    doc = _tenant_document(db, user, document_id)
+    raw_sections = doc.sections_metadata or []
+    new_sections = []
+    matched_section = None
+    for sec in raw_sections:
+        s_dict = dict(sec)
+        if s_dict.get("id") == section_id or s_dict.get("section_id") == section_id:
+            s_dict["allowed_roles"] = list(body.allowed_roles)
+            matched_section = s_dict
+        new_sections.append(s_dict)
+
+    if not matched_section:
+        raise HTTPException(404, "Section not found in document outline.")
+
+    doc.sections_metadata = new_sections
+    flag_modified(doc, "sections_metadata")
+
+    # Update chunks that belong to this section heading
+    heading_text = matched_section.get("heading")
+    if heading_text:
+        chunks = db.execute(
+            select(Chunk).where(Chunk.document_id == doc.id, Chunk.section_heading == heading_text)
+        ).scalars().all()
+        for c in chunks:
+            c.allowed_roles = list(body.allowed_roles)
+            flag_modified(c, "allowed_roles")
+
+    db.commit()
+    audit.log(
+        db,
+        user.tenant_id,
+        user.id,
+        "document.section_access_update",
+        "allowed",
+        document_id=doc.id,
+        section_id=section_id,
+        allowed_roles=body.allowed_roles,
+    )
+    return {"status": "ok", "section": matched_section}
+
+
+@router.post("/documents/upload-database")
+def upload_database_records(
+    background: BackgroundTasks,
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    classification: int = Form(1),
+    grants: str = Form("[]"),
+    actor: User = Depends(require_any_permission("document.upload", "tenant.manage")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Dedicated endpoint for uploading database records (CSV, TSV, JSON, SQL)."""
+    limit = settings.max_upload_mb * 1024 * 1024
+    data = file.file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(413, f"File is larger than {settings.max_upload_mb} MB.")
+    filename = Path(file.filename or "database_records.csv").name
+    ext = Path(filename).suffix.lower()
+    if ext not in (".csv", ".tsv", ".json", ".sql"):
+        raise HTTPException(400, "Database records upload must be a CSV, TSV, JSON, or SQL file.")
+
+    clean_title = title.strip() or Path(filename).stem.replace("_", " ").title()
+    parsed_grants = [Grant(**g) for g in json.loads(grants)]
+    clean_grants = _clean_grants(db, actor.tenant_id, parsed_grants)
+    for g in clean_grants:
+        g.grantor_id = actor.id
+
+    checksum = ingestion.compute_checksum(data)
+    doc = Document(
+        tenant_id=actor.tenant_id,
+        owner_id=actor.id,
+        title=clean_title,
+        filename=filename,
+        kind="database",
+        classification=classification,
+        status="processing",
+        checksum=checksum,
+        access=clean_grants,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    ingestion.store_original(doc, data)
+    background.add_task(ingestion.process_document, doc.id)
+
+    audit.log(db, actor.tenant_id, actor.id, "document.upload_database", "allowed", document_id=doc.id, title=doc.title)
+    return {**doc_out(doc, True, _labels(db, actor.tenant_id)), "readable": True}
+
+
 @router.delete("/documents/{document_id}")
 def delete_document(
     document_id: str,
@@ -1083,6 +1655,11 @@ def get_tenant_settings(
     return {
         "id": tenant.id,
         "name": tenant.name,
+        "slug": tenant.slug,
+        "industry_category": tenant.industry_category,
+        "website": tenant.website,
+        "logo_url": tenant.logo_url,
+        "primary_color": tenant.primary_color or "#10b981",
         "status": tenant.status,
         "settings": tenant.settings or {"max_upload_mb": 25, "retention_days": 90},
     }
@@ -1097,14 +1674,28 @@ def update_tenant_settings(
     tenant = user.tenant
     if body.name:
         tenant.name = body.name.strip()
+    if body.website is not None:
+        tenant.website = body.website.strip()
+    if body.logo_url is not None:
+        tenant.logo_url = body.logo_url
+    if body.industry_category is not None:
+        tenant.industry_category = body.industry_category
+    if body.primary_color is not None:
+        tenant.primary_color = body.primary_color
     if body.settings:
         tenant.settings = {**(tenant.settings or {}), **body.settings}
+        flag_modified(tenant, "settings")
     db.commit()
     db.refresh(tenant)
     audit.log(db, tenant.id, user.id, "tenant.update", "allowed", settings=tenant.settings)
     return {
         "id": tenant.id,
         "name": tenant.name,
+        "slug": tenant.slug,
+        "industry_category": tenant.industry_category,
+        "website": tenant.website,
+        "logo_url": tenant.logo_url,
+        "primary_color": tenant.primary_color,
         "status": tenant.status,
         "settings": tenant.settings,
     }

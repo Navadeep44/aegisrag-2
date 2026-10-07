@@ -4,6 +4,11 @@ export type User = {
   email: string;
   tenant: string;
   tenant_id?: string;
+  tenant_slug?: string;
+  tenant_logo?: string | null;
+  tenant_category?: string;
+  tenant_website?: string | null;
+  tenant_primary_color?: string;
   roles: string[];
   clearance: number;
   clearance_label: string;
@@ -35,6 +40,9 @@ export type DemoUser = {
 export type Role = {
   id: string;
   name: string;
+  slug?: string;
+  description?: string;
+  default_clearance?: number;
   scope?: string;
   is_system?: boolean;
   permission_keys?: string[];
@@ -46,6 +54,17 @@ export type Grant = {
   subject_id: string | null;
   label?: string;
   expires_at?: string | null;
+};
+
+export type SectionMeta = {
+  id?: string;
+  section_id?: string;
+  heading: string;
+  level?: number;
+  page: number;
+  snippet?: string;
+  preview?: string;
+  allowed_roles?: string[];
 };
 
 export type Doc = {
@@ -63,6 +82,15 @@ export type Doc = {
   version?: number;
   checksum?: string | null;
   created_at?: string;
+  sections_metadata?: SectionMeta[];
+  data_schema?: {
+    table_name?: string;
+    columns: string[];
+    row_count?: number;
+    total_rows?: number;
+    primary_key?: string;
+    sample_preview?: Record<string, unknown>[];
+  } | null;
   access?: Grant[];
 };
 
@@ -231,6 +259,11 @@ export type AccessRequest = {
 export type TenantInfo = {
   id: string;
   name: string;
+  slug?: string;
+  industry_category?: string;
+  website?: string;
+  logo_url?: string;
+  primary_color?: string;
   status: string;
   settings?: Record<string, unknown>;
   users_count?: number;
@@ -294,6 +327,62 @@ export type PlatformMetrics = {
 };
 
 export const LEVELS = ["Public", "Internal", "Confidential", "Restricted"];
+
+export type IndustryCategory = {
+  id: string;
+  name: string;
+  badge: string;
+  tagline: string;
+  description: string;
+  icon: string;
+  color: string;
+  roles: {
+    name: string;
+    slug: string;
+    description: string;
+    default_clearance: number;
+    permissions?: string[];
+  }[];
+};
+
+export type RoleHubItem = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  default_clearance: number;
+  clearance_label: string;
+  is_system?: boolean;
+  portal_url: string;
+  assigned_count: number;
+  users: {
+    id: string;
+    name: string;
+    email: string;
+    clearance: number;
+    clearance_label: string;
+    status: string;
+    is_admin?: boolean;
+  }[];
+  permissions: string[];
+};
+
+export type PortalInfo = {
+  company_id: string;
+  company_name: string;
+  company_slug: string;
+  company_logo?: string | null;
+  company_website?: string | null;
+  company_category: string;
+  company_color: string;
+  role_id: string;
+  role_name: string;
+  role_slug: string;
+  role_description: string;
+  clearance: number;
+  clearance_label: string;
+  users_count: number;
+};
 
 export function hasPermission(user: User | null | undefined, perm: string): boolean {
   if (!user) return false;

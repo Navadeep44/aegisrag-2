@@ -190,6 +190,11 @@ class Tenant(Base):
     __tablename__ = "tenants"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String, unique=True)
+    slug: Mapped[str] = mapped_column(String, default="", index=True)
+    industry_category: Mapped[str] = mapped_column(String, default="technology")
+    website: Mapped[str | None] = mapped_column(String, nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    primary_color: Mapped[str | None] = mapped_column(String, default="#10b981")
     status: Mapped[str] = mapped_column(String, default="active")  # active | suspended
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
 
@@ -199,6 +204,9 @@ class Role(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
     name: Mapped[str] = mapped_column(String)
+    slug: Mapped[str] = mapped_column(String, default="")
+    description: Mapped[str] = mapped_column(String, default="")
+    default_clearance: Mapped[int] = mapped_column(Integer, default=1)
     scope: Mapped[str] = mapped_column(String, default="tenant")  # platform | tenant
     is_system: Mapped[bool] = mapped_column(Boolean, default=True)
     permission_keys: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -257,7 +265,7 @@ class Document(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     title: Mapped[str] = mapped_column(String)
     filename: Mapped[str] = mapped_column(String)
-    kind: Mapped[str] = mapped_column(String)  # pdf | image | xlsx | text
+    kind: Mapped[str] = mapped_column(String)  # pdf | image | xlsx | text | database
     classification: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String, default="processing")  # processing | active | failed | flagged | deleted
     note: Mapped[str] = mapped_column(String, default="")
@@ -266,6 +274,8 @@ class Document(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     checksum: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    sections_metadata: Mapped[list] = mapped_column(JSON, default=list)
+    data_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     access: Mapped[list["DocumentAccess"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin"
     )
@@ -288,7 +298,7 @@ class DocumentAccess(Base):
 
 
 class Chunk(Base):
-    """Chunks carry no access list. Permissions always come from the parent document."""
+    """Chunks carry no access list by default. Permissions come from parent doc & section."""
 
     __tablename__ = "chunks"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -298,6 +308,8 @@ class Chunk(Base):
     )
     page: Mapped[int] = mapped_column(Integer)
     location: Mapped[str] = mapped_column(String, default="")
+    section_heading: Mapped[str | None] = mapped_column(String, nullable=True)
+    allowed_roles: Mapped[list | None] = mapped_column(JSON, default=list)
     text: Mapped[str] = mapped_column(Text)
     # pgvector column on Postgres; a JSON list of floats on SQLite.
     embedding = mapped_column(Vector() if IS_POSTGRES else JSON())

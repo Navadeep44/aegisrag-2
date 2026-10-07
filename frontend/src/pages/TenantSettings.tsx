@@ -24,9 +24,19 @@ export default function TenantSettings() {
 
   // Form state
   const [name, setName] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [website, setWebsite] = useState("");
+  const [industryCategory, setIndustryCategory] = useState("technology");
   const [maxUpload, setMaxUpload] = useState(25);
   const [retentionDays, setRetentionDays] = useState(90);
-  const [initialState, setInitialState] = useState({ name: "", maxUpload: 25, retentionDays: 90 });
+  const [initialState, setInitialState] = useState({
+    name: "",
+    logoUrl: "",
+    website: "",
+    industryCategory: "technology",
+    maxUpload: 25,
+    retentionDays: 90,
+  });
   const [saving, setSaving] = useState(false);
 
   // Admin confirmation dialog state
@@ -37,6 +47,9 @@ export default function TenantSettings() {
 
   const isPristine =
     name === initialState.name &&
+    logoUrl === initialState.logoUrl &&
+    website === initialState.website &&
+    industryCategory === initialState.industryCategory &&
     maxUpload === initialState.maxUpload &&
     retentionDays === initialState.retentionDays;
 
@@ -45,11 +58,21 @@ export default function TenantSettings() {
       .then((t) => {
         setTenant(t);
         setName(t.name);
+        setLogoUrl(t.logo_url || "");
+        setWebsite(t.website || "");
+        setIndustryCategory(t.industry_category || "technology");
         const up = Number(t.settings?.max_upload_mb ?? 25);
         const ret = Number(t.settings?.retention_days ?? 90);
         setMaxUpload(up);
         setRetentionDays(ret);
-        setInitialState({ name: t.name, maxUpload: up, retentionDays: ret });
+        setInitialState({
+          name: t.name,
+          logoUrl: t.logo_url || "",
+          website: t.website || "",
+          industryCategory: t.industry_category || "technology",
+          maxUpload: up,
+          retentionDays: ret,
+        });
       })
       .catch((e) => showToast(e.message, "error"));
 
@@ -70,6 +93,23 @@ export default function TenantSettings() {
     loadData();
   }, []);
 
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        showToast("Logo file must be under 2MB.", "error");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          setLogoUrl(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
@@ -77,14 +117,24 @@ export default function TenantSettings() {
     try {
       const updated = await patch<TenantInfo>("/tenant/settings", {
         name: name.trim(),
+        logo_url: logoUrl.trim() || null,
+        website: website.trim() || null,
+        industry_category: industryCategory.trim() || null,
         settings: {
           max_upload_mb: Number(maxUpload),
           retention_days: Number(retentionDays),
         },
       });
       setTenant(updated);
-      setInitialState({ name: updated.name, maxUpload: Number(maxUpload), retentionDays: Number(retentionDays) });
-      showToast("Organization settings saved successfully.", "success");
+      setInitialState({
+        name: updated.name,
+        logoUrl: updated.logo_url || "",
+        website: updated.website || "",
+        industryCategory: updated.industry_category || "technology",
+        maxUpload: Number(maxUpload),
+        retentionDays: Number(retentionDays),
+      });
+      showToast("Organization branding & settings saved successfully.", "success");
     } catch (err) {
       showToast((err as Error).message, "error");
     } finally {
@@ -299,8 +349,8 @@ export default function TenantSettings() {
           )}
 
           <SectionCard
-            title="Organization Profile & Ingestion Quotas"
-            subtitle="Configure workspace display settings and limits applied to ingested documents."
+            title="Organization Profile & Identity"
+            subtitle="Configure your company branding, white-label logo, industry category, and ingestion quotas."
           >
             <form onSubmit={handleSave} className="space-y-6 max-w-xl">
               <div>
@@ -313,43 +363,101 @@ export default function TenantSettings() {
                     onChange={(e) => setName(e.target.value)}
                   />
                 </label>
-                <p className="mt-1 text-xs text-muted">
-                  The visible name of your organization displayed in headers and email notifications.
-                </p>
               </div>
 
+              {/* Industry Category */}
               <div>
                 <label className="block text-sm font-medium text-ink">
-                  Maximum Upload File Size (MB)
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
+                  Industry Category
+                  <select
                     className={`${inputClass} mt-1.5`}
-                    value={maxUpload}
-                    onChange={(e) => setMaxUpload(Number(e.target.value))}
-                  />
+                    value={industryCategory}
+                    onChange={(e) => setIndustryCategory(e.target.value)}
+                  >
+                    <option value="healthcare">Healthcare & Life Sciences</option>
+                    <option value="finance">Finance, Banking & FinTech</option>
+                    <option value="legal">Legal & Compliance Advisory</option>
+                    <option value="defense">Defense & Public Safety</option>
+                    <option value="technology">Technology & SaaS Engineering</option>
+                    <option value="pharma">Pharmaceuticals & Clinical Trials</option>
+                  </select>
                 </label>
-                <p className="mt-1 text-xs text-muted">
-                  The maximum size for any individual document uploaded into the AegisRAG vector catalog.
-                </p>
               </div>
 
+              {/* Company Logo Upload & Live Preview */}
+              <div>
+                <label className="block text-sm font-medium text-ink mb-1.5">Company Logo</label>
+                <div className="flex items-center gap-4">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-line bg-surface-subtle p-1.5 overflow-hidden shadow-xs">
+                    {logoUrl ? (
+                      <img src={logoUrl} alt="Company Logo" className="h-full w-full object-contain" />
+                    ) : (
+                      <span className="font-mono text-xs font-bold text-muted">
+                        {(name || "CO").slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-1.5">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                      onChange={handleLogoUpload}
+                      className="block w-full text-xs text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-surface-subtle file:text-ink hover:file:bg-line cursor-pointer"
+                    />
+                    <input
+                      type="url"
+                      placeholder="Or enter logo image URL (https://...)"
+                      className={`${inputClass} text-xs`}
+                      value={logoUrl}
+                      onChange={(e) => setLogoUrl(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Company Website */}
               <div>
                 <label className="block text-sm font-medium text-ink">
-                  Data & Audit Retention Period (Days)
+                  Company Website (Optional)
                   <input
-                    type="number"
-                    min={7}
-                    max={365}
+                    type="url"
+                    placeholder="https://example.com"
                     className={`${inputClass} mt-1.5`}
-                    value={retentionDays}
-                    onChange={(e) => setRetentionDays(Number(e.target.value))}
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
                   />
                 </label>
-                <p className="mt-1 text-xs text-muted">
-                  Number of days before audit events and search telemetry are automatically archived.
-                </p>
+              </div>
+
+              <div className="pt-4 border-t border-line space-y-4">
+                <h4 className="text-xs font-bold uppercase tracking-wider font-mono text-muted">Ingestion Quotas & Retention</h4>
+                <div>
+                  <label className="block text-sm font-medium text-ink">
+                    Maximum Upload File Size (MB)
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      className={`${inputClass} mt-1.5`}
+                      value={maxUpload}
+                      onChange={(e) => setMaxUpload(Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-ink">
+                    Data & Audit Retention Period (Days)
+                    <input
+                      type="number"
+                      min={7}
+                      max={365}
+                      className={`${inputClass} mt-1.5`}
+                      value={retentionDays}
+                      onChange={(e) => setRetentionDays(Number(e.target.value))}
+                    />
+                  </label>
+                </div>
               </div>
 
               <div className="pt-2">

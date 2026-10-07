@@ -10,6 +10,9 @@ import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
 import PlatformAdmin from "./pages/PlatformAdmin";
 import Profile from "./pages/Profile";
+import RegisterCompany from "./pages/RegisterCompany";
+import RolePortal from "./pages/RolePortal";
+import RolePortalsHub from "./pages/RolePortalsHub";
 import Security from "./pages/Security";
 import SignIn from "./pages/SignIn";
 import Simulator from "./pages/Simulator";
@@ -29,11 +32,14 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/signin" element={<SignIn />} />
+      <Route path="/register" element={<RegisterCompany />} />
+      <Route path="/portal/:companySlug/:roleSlug" element={<RolePortal />} />
       <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<DefaultAppRedirect />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="ask" element={<Chat />} />
         <Route path="documents" element={<Documents />} />
+        <Route path="roles-hub" element={<RolePortalsHub />} />
         <Route path="users-and-roles" element={<UsersAndRoles />} />
         <Route path="department-insights" element={<DepartmentInsights />} />
         <Route path="access-requests" element={<AccessRequests />} />

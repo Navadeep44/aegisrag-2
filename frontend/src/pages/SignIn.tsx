@@ -70,6 +70,12 @@ export default function SignIn() {
           </label>
           {error && <Notice tone="error">{error}</Notice>}
           <Button type="submit">Sign in</Button>
+          <div className="pt-2 text-xs text-muted">
+            Need a dedicated SaaS workspace for your company?{" "}
+            <Link to="/register" className="font-semibold text-accent hover:underline">
+              Register company portal →
+            </Link>
+          </div>
         </form>
       </section>
 

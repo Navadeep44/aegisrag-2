@@ -21,6 +21,10 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  Database,
+  Heading,
+  Check,
+  FileSpreadsheet,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Button } from "../components/ui/Button";
@@ -35,7 +39,7 @@ import { UploadForm } from "../features/documents/UploadForm";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { api, imageUrl, post } from "../lib/api";
-import type { Department, Doc, DocStatus, FlaggedDoc, Grant, Role, User } from "../lib/types";
+import type { Department, Doc, DocStatus, FlaggedDoc, Grant, Role, SectionMeta, User } from "../lib/types";
 import { hasPermission } from "../lib/types";
 
 export default function Documents() {
@@ -56,7 +60,12 @@ export default function Documents() {
   // Drawers & Modals
   const [uploadDrawerOpen, setUploadDrawerOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<Doc | null>(null);
-  const [docDrawerTab, setDocDrawerTab] = useState<"access" | "pages" | "processing" | "danger">("access");
+  const [docDrawerTab, setDocDrawerTab] = useState<"access" | "sections" | "pages" | "processing" | "danger">("access");
+
+  // Extracted PDF Headings & Database Records state
+  const [sections, setSections] = useState<SectionMeta[]>([]);
+  const [sectionsLoading, setSectionsLoading] = useState(false);
+  const [savingSectionId, setSavingSectionId] = useState<string | null>(null);
 
   // Preview state inside drawer
   const [previewPage, setPreviewPage] = useState(1);
@@ -161,6 +170,56 @@ export default function Documents() {
         .finally(() => setJobLoading(false));
     }
   }, [selectedDoc, docDrawerTab]);
+
+  // Load extracted sections when selectedDoc or docDrawerTab changes
+  useEffect(() => {
+    if (!selectedDoc) {
+      setSections([]);
+      return;
+    }
+    if (selectedDoc.sections_metadata && selectedDoc.sections_metadata.length > 0) {
+      setSections(selectedDoc.sections_metadata);
+    }
+    if (docDrawerTab === "sections") {
+      setSectionsLoading(true);
+      api<{ sections: SectionMeta[] }>(`/documents/${selectedDoc.id}/sections`)
+        .then((res) => {
+          if (res.sections) setSections(res.sections);
+        })
+        .catch(() => {
+          if (selectedDoc.sections_metadata) setSections(selectedDoc.sections_metadata);
+        })
+        .finally(() => setSectionsLoading(false));
+    }
+  }, [selectedDoc, docDrawerTab]);
+
+  async function handleToggleRoleForSection(sectionId: string, roleSlug: string) {
+    if (!selectedDoc) return;
+    const target = sections.find((s) => s.section_id === sectionId);
+    if (!target) return;
+    const currentRoles = target.allowed_roles || [];
+    const updatedRoles = currentRoles.includes(roleSlug)
+      ? currentRoles.filter((r) => r !== roleSlug)
+      : [...currentRoles, roleSlug];
+
+    setSections((prev) =>
+      prev.map((s) => (s.section_id === sectionId ? { ...s, allowed_roles: updatedRoles } : s))
+    );
+    setSavingSectionId(sectionId);
+
+    try {
+      await api(`/documents/${selectedDoc.id}/sections/${sectionId}/access`, {
+        method: "PUT",
+        body: JSON.stringify({ allowed_roles: updatedRoles }),
+      });
+      showToast(`Role access saved for section "${target.heading}".`, "success");
+      load();
+    } catch (err) {
+      showToast((err as Error).message, "error");
+    } finally {
+      setSavingSectionId(null);
+    }
+  }
 
   async function saveAccess(doc: Doc, grants: Grant[], classification = doc.classification) {
     try {
@@ -300,70 +359,33 @@ export default function Documents() {
 
   return (
     <div className="space-y-8 pb-16">
-      {/* 1. Page Header with single Upload Action */}
-      <PageHeader
-        title="Documents"
-        subtitle="Searchable enterprise documents matched to your role permissions and security clearance."
-        action={
-          canUpload ? (
-            <Button
-              kind="primary"
-              onClick={() => setUploadDrawerOpen(true)}
-              className="flex items-center gap-2"
-            >
-              <Upload className="h-4 w-4" />
-              <span>Upload document</span>
-            </Button>
-          ) : undefined
-        }
-      />
+      {/* 1. Page Header with clean count and single Upload Action */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-ink tracking-tight">Documents</h1>
+            <span className="rounded-full bg-surface-subtle px-2.5 py-0.5 text-xs font-medium text-muted border border-line">
+              {docs?.length ?? 0} total
+            </span>
+          </div>
+          <p className="mt-1 text-xs sm:text-sm text-muted">
+            Searchable organization documents and role permissions
+          </p>
+        </div>
+
+        {canUpload && (
+          <Button
+            kind="primary"
+            onClick={() => setUploadDrawerOpen(true)}
+            className="flex items-center gap-2"
+          >
+            <Upload className="h-4 w-4" />
+            <span>Upload Document</span>
+          </Button>
+        )}
+      </div>
 
       {error && <Notice tone="error">{error}</Notice>}
-
-      {/* 2. Compact Operational Metrics Strip */}
-      {docs === null ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCardSkeleton />
-          <StatCardSkeleton />
-          <StatCardSkeleton />
-          <StatCardSkeleton />
-        </div>
-      ) : (
-        <section aria-label="Catalog metrics" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            label="Total Documents"
-            value={docs.length}
-            subtext="In organization catalog"
-          />
-          <StatCard
-            label="Ready to Search"
-            value={activeCount}
-            subtext="Active in vector knowledge store"
-            tone="emerald"
-          />
-          <StatCard
-            label="Processing Queue"
-            value={processingCount}
-            subtext="OCR and passage extraction"
-            tone={processingCount > 0 ? "sky" : "default"}
-          />
-          <StatCard
-            label="Flagged for Review"
-            value={flaggedDocs.length || flaggedCount}
-            subtext={
-              flaggedDocs.length > 0
-                ? "Click to review quarantined files"
-                : "Zero security flags detected"
-            }
-            tone={flaggedDocs.length > 0 || flaggedCount > 0 ? "amber" : "default"}
-            onClick={
-              flaggedDocs.length > 0
-                ? () => setReviewingFlagged(flaggedDocs[0])
-                : undefined
-            }
-          />
-        </section>
-      )}
 
       {/* 3. Sticky Filter & Search Toolbar */}
       <div className="sticky top-0 z-10 -mx-4 sm:-mx-8 lg:-mx-12 px-4 sm:px-8 lg:px-12 py-3 bg-page/95 backdrop-blur-md border-b border-line">
@@ -577,6 +599,22 @@ export default function Documents() {
               </button>
               <button
                 type="button"
+                onClick={() => setDocDrawerTab("sections")}
+                className={`pb-2.5 transition-colors border-b-2 flex items-center gap-1.5 ${
+                  docDrawerTab === "sections"
+                    ? "border-ink text-ink font-semibold"
+                    : "border-transparent text-muted hover:text-ink"
+                }`}
+              >
+                <span>{selectedDoc.kind === "database" ? "Schema" : "Sections"}</span>
+                {sections.length > 0 && (
+                  <span className="rounded-full bg-accent/15 px-1.5 py-0.2 text-[0.65rem] font-bold text-accent">
+                    {sections.length}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={() => setDocDrawerTab("pages")}
                 className={`pb-2.5 transition-colors border-b-2 ${
                   docDrawerTab === "pages"
@@ -640,6 +678,169 @@ export default function Documents() {
                       >
                         Request access for team member
                       </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: Extracted Headings / Database Schema */}
+            {docDrawerTab === "sections" && (
+              <div className="space-y-4">
+                {selectedDoc.kind === "database" ? (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-line bg-surface p-4 space-y-3">
+                      <div className="flex items-center justify-between pb-1">
+                        <div className="flex items-center gap-2">
+                          <Database className="h-4 w-4 text-accent" />
+                          <h4 className="font-semibold text-ink text-sm">Table Schema</h4>
+                        </div>
+                        <span className="rounded-full bg-surface-subtle px-2 py-0.5 text-xs font-mono text-muted border border-line">
+                          {selectedDoc.data_schema?.total_rows ?? 0} Rows
+                        </span>
+                      </div>
+                      {selectedDoc.data_schema?.columns && (
+                        <div>
+                          <p className="text-[0.7rem] uppercase font-mono tracking-wider text-muted mb-1.5">Detected Columns</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedDoc.data_schema.columns.map((col) => (
+                              <span
+                                key={col}
+                                className="rounded-md border border-line bg-surface-subtle px-2 py-1 text-xs font-mono font-medium text-ink"
+                              >
+                                {col}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedDoc.data_schema?.sample_preview && selectedDoc.data_schema.sample_preview.length > 0 && selectedDoc.data_schema.columns && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted font-mono">
+                          Sample Ingested Rows ({selectedDoc.data_schema.sample_preview.length} sample):
+                        </p>
+                        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-xs">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-surface-subtle border-b border-line text-muted font-mono uppercase tracking-wider">
+                              <tr>
+                                {selectedDoc.data_schema.columns.map((col) => (
+                                  <th key={col} className="px-3 py-2 font-medium">
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-line">
+                              {selectedDoc.data_schema.sample_preview.slice(0, 5).map((row: Record<string, unknown>, rIdx: number) => (
+                                <tr key={rIdx} className="hover:bg-surface-hover/50">
+                                  {selectedDoc.data_schema?.columns.map((col) => (
+                                    <td key={col} className="px-3 py-2 text-ink font-mono whitespace-nowrap">
+                                      {String(row[col] ?? "")}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between pb-1">
+                      <div className="flex items-center gap-2">
+                        <Heading className="h-4 w-4 text-accent" />
+                        <h4 className="font-semibold text-ink text-sm">Document Sections</h4>
+                      </div>
+                      <span className="text-xs text-muted">Click role to restrict access</span>
+                    </div>
+
+                    {sectionsLoading ? (
+                      <div className="flex items-center justify-center p-8 text-xs text-muted gap-2">
+                        <RefreshCw className="h-4 w-4 animate-spin text-accent" />
+                        <span>Extracting document sections and outline...</span>
+                      </div>
+                    ) : sections.length === 0 ? (
+                      <div className="rounded-xl border border-line bg-surface-subtle p-6 text-center text-xs text-muted space-y-1">
+                        <p className="font-semibold text-ink">No Headings Detected</p>
+                        <p>All passages in this document currently inherit document-level access grants.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {sections.map((sec, idx) => (
+                          <div
+                            key={sec.section_id || idx}
+                            className="rounded-xl border border-line bg-surface p-4 space-y-3 shadow-xs"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="flex h-5 w-5 items-center justify-center rounded bg-accent/15 text-accent font-mono text-[0.65rem] font-bold shrink-0">
+                                    §
+                                  </span>
+                                  <h5 className="font-semibold text-ink text-sm truncate">{sec.heading}</h5>
+                                </div>
+                                {sec.preview && (
+                                  <p className="mt-1 text-xs text-muted line-clamp-2 italic">
+                                    "{sec.preview}"
+                                  </p>
+                                )}
+                              </div>
+                              <span className="shrink-0 rounded bg-surface-subtle px-2 py-0.5 text-[0.7rem] font-mono text-muted border border-line">
+                                Page {sec.page}
+                              </span>
+                            </div>
+
+                            {/* Role Permission Toggles */}
+                            <div className="pt-2 border-t border-line/60">
+                              <div className="flex items-center justify-between text-xs mb-2">
+                                <span className="font-medium text-muted">Authorized Roles:</span>
+                                <span className="text-[0.65rem] text-muted font-mono">
+                                  {sec.allowed_roles && sec.allowed_roles.length > 0
+                                    ? `${sec.allowed_roles.length} restricted`
+                                    : "All roles allowed"}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-wrap gap-1.5">
+                                {roles.map((r) => {
+                                  const roleSlug = r.slug || r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+                                  const isAllowed =
+                                    !sec.allowed_roles ||
+                                    sec.allowed_roles.length === 0 ||
+                                    sec.allowed_roles.includes(roleSlug) ||
+                                    sec.allowed_roles.includes(r.name);
+                                  const isSaving = savingSectionId === (sec.section_id || sec.id || String(idx));
+
+                                  return (
+                                    <button
+                                      key={r.id}
+                                      type="button"
+                                      disabled={isSaving}
+                                      onClick={() => handleToggleRoleForSection(sec.section_id || sec.id || String(idx), roleSlug)}
+                                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+                                        isAllowed
+                                          ? "bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100"
+                                          : "bg-surface-subtle text-muted border border-line hover:border-ink hover:text-ink"
+                                      }`}
+                                    >
+                                      {isAllowed ? (
+                                        <Check className="h-3 w-3 text-emerald-600" />
+                                      ) : (
+                                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                      )}
+                                      <span>{r.name}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}

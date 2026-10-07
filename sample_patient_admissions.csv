@@ -1,0 +1,6 @@
+record_id,patient_name,age,department,admission_status,attending_physician,primary_diagnosis,total_billed_usd
+PAT-1001,Eleanor Vance,45,Cardiology,Admitted,Dr. Gregory House,Atrial Fibrillation,14500.00
+PAT-1002,Marcus Brody,62,Neurology,Observation,Dr. Allison Cameron,Transient Ischemic Attack,8250.50
+PAT-1003,Clara Oswald,29,Trauma Center,Discharged,Dr. Gregory House,Compound Fracture Left Radius,6400.00
+PAT-1004,James Holden,38,Pulmonology,Admitted,Dr. Robert Chase,Acute Respiratory Distress,22100.75
+PAT-1005,Avasarala Chris,55,Oncology,Scheduled,Dr. Allison Cameron,Stage II Lymphoma Assessment,31000.00

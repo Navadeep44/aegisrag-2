@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { UploadCloud, File, X, Shield, Lock } from "lucide-react";
+import { UploadCloud, FileText, Database, FileSpreadsheet, CheckCircle2 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Notice } from "../../components/ui/Notice";
 import { api } from "../../lib/api";
@@ -19,6 +19,7 @@ export function UploadForm({
   onCancel,
 }: UploadFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadType, setUploadType] = useState<"pdf" | "database">("pdf");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [classification, setClassification] = useState(1);
@@ -27,18 +28,41 @@ export function UploadForm({
   const [error, setError] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
 
+  const acceptedExtensions = uploadType === "pdf" ? ".pdf" : ".csv,.tsv,.json,.sql";
+
+  const handleTypeSwitch = (type: "pdf" | "database") => {
+    setUploadType(type);
+    setSelectedFile(null);
+    setTitle("");
+    setError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setSelectedFile(file);
-      if (!title) {
-        // Auto-generate clean title from filename
-        const cleanName = file.name
-          .replace(/\.[^/.]+$/, "")
-          .replace(/[-_]/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase());
-        setTitle(cleanName);
-      }
+      validateAndSetFile(file);
+    }
+  };
+
+  const validateAndSetFile = (file: File) => {
+    const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+    if (uploadType === "pdf" && ext !== ".pdf") {
+      setError("Please select a valid PDF document (.pdf).");
+      return;
+    }
+    if (uploadType === "database" && ![".csv", ".tsv", ".json", ".sql"].includes(ext)) {
+      setError("Please select valid Database Records (.csv, .tsv, .json, .sql).");
+      return;
+    }
+    setError("");
+    setSelectedFile(file);
+    if (!title) {
+      const cleanName = file.name
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[-_]/g, " ")
+        .replace(/\b\w/g, (l) => l.toUpperCase());
+      setTitle(cleanName);
     }
   };
 
@@ -47,21 +71,14 @@ export function UploadForm({
     setIsDragOver(false);
     const file = e.dataTransfer.files?.[0];
     if (file) {
-      setSelectedFile(file);
-      if (!title) {
-        const cleanName = file.name
-          .replace(/\.[^/.]+$/, "")
-          .replace(/[-_]/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase());
-        setTitle(cleanName);
-      }
+      validateAndSetFile(file);
     }
   };
 
   async function upload(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedFile) {
-      setError("Please choose a file to upload.");
+      setError(`Please select a ${uploadType === "pdf" ? "PDF" : "Database records"} file.`);
       return;
     }
 
@@ -83,7 +100,8 @@ export function UploadForm({
     setBusy(true);
     setError("");
     try {
-      await api("/documents/upload", { method: "POST", body: form });
+      const endpoint = uploadType === "pdf" ? "/documents/upload" : "/documents/upload-database";
+      await api(endpoint, { method: "POST", body: form });
       setTitle("");
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -97,7 +115,36 @@ export function UploadForm({
 
   return (
     <form onSubmit={upload} className="space-y-5">
-      {/* Drag and Drop Zone */}
+      {/* 1. Document Format Selector */}
+      <div className="grid grid-cols-2 gap-2 p-1 bg-surface-subtle border border-line rounded-xl">
+        <button
+          type="button"
+          onClick={() => handleTypeSwitch("pdf")}
+          className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all ${
+            uploadType === "pdf"
+              ? "bg-surface text-ink shadow-xs border border-line"
+              : "text-muted hover:text-ink"
+          }`}
+        >
+          <FileText className={`h-4 w-4 ${uploadType === "pdf" ? "text-accent" : "text-muted"}`} />
+          <span>PDF Document</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleTypeSwitch("database")}
+          className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all ${
+            uploadType === "database"
+              ? "bg-surface text-ink shadow-xs border border-line"
+              : "text-muted hover:text-ink"
+          }`}
+        >
+          <Database className={`h-4 w-4 ${uploadType === "database" ? "text-accent" : "text-muted"}`} />
+          <span>Database Records</span>
+        </button>
+      </div>
+
+      {/* 2. Drag & Drop File Zone */}
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -110,27 +157,27 @@ export function UploadForm({
           isDragOver
             ? "border-ink bg-surface-subtle"
             : selectedFile
-            ? "border-allow-border bg-allow-bg/40"
+            ? "border-emerald-500 bg-emerald-50/40"
             : "border-line bg-surface hover:border-ink/50 hover:bg-surface-subtle/50"
         }`}
       >
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.png,.jpg,.jpeg,.xlsx,.txt,.md"
+          accept={acceptedExtensions}
           className="hidden"
           onChange={handleFileChange}
         />
 
         {selectedFile ? (
           <div className="flex items-center gap-3 text-left">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-allow-bg text-allow border border-allow-border">
-              <File className="h-5 w-5" />
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">
+              {uploadType === "pdf" ? <FileText className="h-6 w-6" /> : <FileSpreadsheet className="h-6 w-6" />}
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-ink truncate">{selectedFile.name}</p>
+              <p className="text-xs font-bold text-ink truncate">{selectedFile.name}</p>
               <p className="text-[0.7rem] text-muted">
-                {(selectedFile.size / 1024).toFixed(1)} KB • Click to choose a different file
+                {(selectedFile.size / 1024).toFixed(1)} KB • {uploadType === "pdf" ? "PDF Document" : "Database Records"} • Click to replace
               </p>
             </div>
           </div>
@@ -140,22 +187,24 @@ export function UploadForm({
               <UploadCloud className="h-5 w-5" />
             </div>
             <p className="text-xs font-semibold text-ink">
-              Click to select or drag and drop your document
+              {uploadType === "pdf"
+                ? "Click to select or drag and drop a PDF file"
+                : "Click to select or drag and drop Database Records (.csv, .tsv, .json, .sql)"}
             </p>
             <p className="text-[0.7rem] text-muted">
-              Supports PDF, Scanned Images (PNG/JPG), Excel, TXT or Markdown (up to 25MB)
+              {uploadType === "pdf" ? "Allowed: .pdf (Max 25MB)" : "Allowed: .csv, .tsv, .json, .sql (Max 25MB)"}
             </p>
           </div>
         )}
       </div>
 
-      {/* Document Metadata Form */}
-      <div className="space-y-3 text-xs sm:text-sm">
+      {/* 3. Document Details & Permissions */}
+      <div className="space-y-3">
         <div>
           <label className="block text-xs font-medium text-ink mb-1">Document Title</label>
           <input
             type="text"
-            placeholder="e.g. Employee Leave Policy 2026"
+            placeholder={uploadType === "pdf" ? "e.g. Clinical Operating Procedure 2026" : "e.g. Patient Admissions 2026"}
             className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -179,15 +228,15 @@ export function UploadForm({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-ink mb-1">Initial Access Grant</label>
+            <label className="block text-xs font-medium text-ink mb-1">Access Scope</label>
             <select
               className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
               value={initialGrant}
               onChange={(e) => setInitialGrant(e.target.value)}
             >
-              <option value="">No access yet (Private)</option>
-              <option value="*">Everyone in organization</option>
-              <optgroup label="Roles">
+              <option value="">Private (Owner & Granular Roles Only)</option>
+              <option value="*">All Company Members</option>
+              <optgroup label="Specific Roles">
                 {roles.map((r) => (
                   <option key={r.id} value={`role:${r.id}`}>
                     Role: {r.name}
@@ -208,20 +257,21 @@ export function UploadForm({
         </div>
       </div>
 
-      <div className="rounded-lg border border-line bg-surface-subtle/50 p-3 text-xs text-muted leading-relaxed">
-        <strong>Zero-Trust Guarantee:</strong> Documents are quarantined during ingestion. Optical Character Recognition (OCR), text extraction, and prompt sanitizers run before vector indexing.
-      </div>
-
       {error && <Notice tone="error">{error}</Notice>}
 
-      <div className="flex justify-end gap-2.5 pt-2">
+      {/* 4. Action Buttons */}
+      <div className="flex justify-end gap-2.5 pt-2 border-t border-line">
         {onCancel && (
           <Button type="button" kind="secondary" onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
         )}
         <Button type="submit" disabled={busy || !selectedFile}>
-          {busy ? "Uploading and processing..." : "Upload document"}
+          {busy
+            ? "Ingesting..."
+            : uploadType === "pdf"
+            ? "Upload PDF"
+            : "Upload Records"}
         </Button>
       </div>
     </form>

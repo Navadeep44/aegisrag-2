@@ -72,9 +72,6 @@ export function AccessEditor({
             </option>
           ))}
         </select>
-        <p className="text-[0.7rem] text-muted leading-relaxed">
-          Users must possess a clearance level equal to or higher than this tier to search this document.
-        </p>
       </div>
 
       {/* Role Grants */}
@@ -203,9 +200,6 @@ export function AccessEditor({
         )}
       </div>
 
-      <div className="rounded-lg border border-line bg-surface-subtle/50 p-3 text-xs text-muted leading-relaxed">
-        <strong>How access works:</strong> Role and department grants require matching clearance. An individual grant is a named exception recorded in the audit log.
-      </div>
     </div>
   );
 }

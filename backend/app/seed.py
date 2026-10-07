@@ -91,20 +91,32 @@ def seed(db: Session) -> None:
     files = demo_docs.generate(Path(tempfile.mkdtemp(prefix="aegis_demo_")))
     password = hash_password(settings.demo_password)
 
+    from app.industry_templates import slugify
+
     platform_tenant = Tenant(
         name="Aegis Platform",
+        slug="platform",
+        industry_category="technology",
         status="active",
         settings={"description": "Global administration and platform scope"},
     )
     acme = Tenant(
         name="Acme Corp",
+        slug="acme",
+        industry_category="technology",
+        website="https://acme.test",
+        primary_color="#6366f1",
         status="active",
-        settings={"max_upload_mb": 25, "retention_days": 90},
+        settings={"max_upload_mb": 25, "retention_days": 90, "industry": "Enterprise SaaS & Cloud Platforms"},
     )
     globex = Tenant(
         name="Globex",
+        slug="globex",
+        industry_category="defense",
+        website="https://globex.test",
+        primary_color="#ef4444",
         status="active",
-        settings={"max_upload_mb": 25, "retention_days": 90},
+        settings={"max_upload_mb": 25, "retention_days": 90, "industry": "Defense, Aerospace & Security"},
     )
     db.add_all([platform_tenant, acme, globex])
     db.flush()
@@ -112,6 +124,8 @@ def seed(db: Session) -> None:
     platform_role = Role(
         tenant_id=platform_tenant.id,
         name="platform_super_admin",
+        slug="platform-admin",
+        description="Global platform super administrator.",
         scope="platform",
         is_system=True,
         permission_keys=DEFAULT_ROLE_PERMISSIONS.get("platform_super_admin", []),
@@ -122,6 +136,9 @@ def seed(db: Session) -> None:
         name: Role(
             tenant_id=acme.id,
             name=name,
+            slug=slugify(name),
+            description=f"{name.replace('_', ' ').title()} role for Acme Corp.",
+            default_clearance=2 if name in ("finance", "engineering", "admin", "department_manager") else (3 if name in ("hr", "organization_owner") else 1),
             scope="tenant",
             is_system=True,
             permission_keys=DEFAULT_ROLE_PERMISSIONS.get(name, []),
@@ -132,6 +149,9 @@ def seed(db: Session) -> None:
         name: Role(
             tenant_id=globex.id,
             name=name,
+            slug=slugify(name),
+            description=f"{name.replace('_', ' ').title()} role for Globex.",
+            default_clearance=2 if name == "admin" else 1,
             scope="tenant",
             is_system=True,
             permission_keys=DEFAULT_ROLE_PERMISSIONS.get(name, []),

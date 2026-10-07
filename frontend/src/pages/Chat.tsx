@@ -251,85 +251,31 @@ export default function Chat() {
 
       {/* 2. Chat Stream / Messages Area */}
       <div className="min-h-0 flex-1 overflow-y-auto py-6 space-y-6">
-        {/* Empty State: Hero Input & Starter Chips */}
+        {/* Empty State: Focused & Minimalist */}
         {!hasMessages && (
-          <div className="mx-auto flex max-w-2xl flex-col items-center justify-center pt-8 sm:pt-16 text-center space-y-6">
-            <div className="space-y-2">
-              <span className="inline-flex items-center gap-1 rounded-full bg-surface border border-line px-3 py-1 text-xs text-muted font-medium shadow-xs">
-                <Sparkles className="h-3.5 w-3.5 text-accent" />
-                <span>Zero-trust grounded knowledge</span>
-              </span>
-              <h2 className="display text-4xl sm:text-5xl font-semibold text-ink tracking-tight">
-                What would you like to know?
+          <div className="mx-auto flex max-w-xl flex-col items-center justify-center pt-12 sm:pt-20 text-center space-y-5">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface border border-line text-accent shadow-xs">
+              <Sparkles className="h-6 w-6" />
+            </div>
+            <div className="space-y-1.5">
+              <h2 className="text-2xl sm:text-3xl font-bold text-ink tracking-tight">
+                How can I help you today?
               </h2>
-              <p className="text-sm sm:text-base text-muted max-w-md mx-auto">
-                Answers cite exact page passages from documents you have permission to read.
+              <p className="text-xs sm:text-sm text-muted">
+                Ask any question grounded in your authorized organization documents.
               </p>
             </div>
 
-            {/* Topic Filter Pills */}
-            <div className="flex flex-wrap justify-center gap-1.5 text-xs pt-2">
-              <button
-                onClick={() => setActiveCategory("tailored")}
-                className={`rounded-full px-3 py-1 transition-all ${
-                  activeCategory === "tailored"
-                    ? "bg-ink font-medium text-white shadow-xs"
-                    : "border border-line bg-surface text-muted hover:text-ink"
-                }`}
-              >
-                Tailored for {user?.name.split(" ")[0] || "You"}
-              </button>
-              <button
-                onClick={() => setActiveCategory("all")}
-                className={`rounded-full px-3 py-1 transition-all ${
-                  activeCategory === "all"
-                    ? "bg-ink font-medium text-white shadow-xs"
-                    : "border border-line bg-surface text-muted hover:text-ink"
-                }`}
-              >
-                All Topics
-              </button>
-              <button
-                onClick={() => setActiveCategory("hr")}
-                className={`rounded-full px-3 py-1 transition-all ${
-                  activeCategory === "hr"
-                    ? "bg-ink font-medium text-white shadow-xs"
-                    : "border border-line bg-surface text-muted hover:text-ink"
-                }`}
-              >
-                HR & Leave
-              </button>
-              <button
-                onClick={() => setActiveCategory("finance")}
-                className={`rounded-full px-3 py-1 transition-all ${
-                  activeCategory === "finance"
-                    ? "bg-ink font-medium text-white shadow-xs"
-                    : "border border-line bg-surface text-muted hover:text-ink"
-                }`}
-              >
-                Finance & Revenue
-              </button>
-              <button
-                onClick={() => setActiveCategory("engineering")}
-                className={`rounded-full px-3 py-1 transition-all ${
-                  activeCategory === "engineering"
-                    ? "bg-ink font-medium text-white shadow-xs"
-                    : "border border-line bg-surface text-muted hover:text-ink"
-                }`}
-              >
-                Architecture & Specs
-              </button>
-            </div>
-
             {/* Prompt Starter Chips */}
-            <div className="w-full grid gap-2.5 sm:grid-cols-2 text-left pt-2">
-              {promptList.map((q) => (
+            <div className="w-full flex flex-col gap-2 pt-2 text-left">
+              {promptList.slice(0, 3).map((q) => (
                 <button
                   key={q}
                   onClick={() => ask(q)}
-                  className="rounded-xl border border-line bg-surface p-3.5 text-xs text-ink transition-all hover:border-ink/60 hover:bg-surface-subtle hover:shadow-xs"
+                  className="rounded-xl border border-line bg-surface px-4 py-3 text-xs text-ink/90 transition-all hover:border-ink hover:text-ink hover:shadow-xs flex items-center justify-between group"
                 >
-                  <span className="font-medium leading-relaxed block">"{q}"</span>
+                  <span className="font-medium leading-relaxed truncate">{q}</span>
+                  <span className="text-muted text-[0.7rem] group-hover:text-accent font-medium shrink-0 ml-2">Ask →</span>
                 </button>
               ))}
             </div>
