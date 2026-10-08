@@ -8,19 +8,22 @@ import { PinnedSteps } from "../components/motion/PinnedSteps";
 
 export default function Home() {
   return (
-    <>
+    <div className="flex min-h-screen flex-col bg-page text-ink selection:bg-accent/15 selection:text-accent">
       <PublicNav />
-      <main>
+      <main className="flex-1">
         <Hero />
         <SameQuestion />
-        <section className="mx-auto max-w-6xl px-6 py-12">
-          <PinnedSteps />
+        <section id="architecture" className="border-t border-line bg-page py-16 sm:py-20">
+          <div className="mx-auto max-w-6xl px-6">
+            <PinnedSteps />
+          </div>
         </section>
         <HowItWorks />
         <Checks />
       </main>
       <Footer />
-    </>
+    </div>
   );
 }
+
 

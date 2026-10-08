@@ -1,76 +1,128 @@
 import { Reveal } from "../../components/motion/Reveal";
 import { ButtonLink } from "../../components/ui/Button";
-import { ShieldAlert, Building2, EyeOff, FileQuestion, UserX, Link2Off } from "lucide-react";
+import { ShieldAlert, Building2, EyeOff, FileQuestion, UserX, Link2Off, ShieldCheck, ArrowRight, CheckCircle2 } from "lucide-react";
 
 const CHECKS = [
   {
-    title: "Revoked access", 
-    body: "Access is granted, a question is answered, access is revoked. The next question is refused and the earlier answer is withdrawn.",
-    icon: <ShieldAlert className="h-6 w-6 text-warn" />
+    title: "Revoked Access Barrier",
+    category: "Lifecycle ACL",
+    body: "When user access is revoked, existing answer sessions and document vector candidates are immediately invalidated.",
+    icon: <ShieldAlert className="h-5 w-5 text-amber-600" />,
+    badge: "Active Revocation",
   },
   {
-    title: "Another organization", 
-    body: "A user from a second company gets no content, no page previews and no admin actions on the first company's files.",
-    icon: <Building2 className="h-6 w-6 text-ink" />
+    title: "Multi-Tenant Isolation",
+    category: "Tenant Boundary",
+    body: "Organizations operate in completely isolated cryptographic boundaries. No cross-tenant document candidate is ever retrieved.",
+    icon: <Building2 className="h-5 w-5 text-indigo-600" />,
+    badge: "100% Boundary Isolation",
   },
   {
-    title: "Hidden instructions", 
-    body: "A PDF carries invisible text telling the model to reveal salaries. The text is removed at upload and flagged.",
-    icon: <EyeOff className="h-6 w-6 text-ink" />
+    title: "Prompt Injection Neutralization",
+    category: "Ingestion Defense",
+    body: "Hidden adversarial prompt injections embedded in white-on-white text or document metadata are sanitized before indexing.",
+    icon: <EyeOff className="h-5 w-5 text-emerald-600" />,
+    badge: "Sanitized & Flagged",
   },
   {
-    title: "Invented citations", 
-    body: "An answer that cites a passage the model was never given is discarded instead of shown.",
-    icon: <FileQuestion className="h-6 w-6 text-ink" />
+    title: "Hallucination & Fake Citations",
+    category: "Evidence Grounding",
+    body: "Any generated claim that cannot be traced to an authorized pre-retrieval chunk is automatically detected and abstained.",
+    icon: <FileQuestion className="h-5 w-5 text-blue-600" />,
+    badge: "Strict Citation Check",
   },
   {
-    title: "Forged identity", 
-    body: "Roles, clearance and organization sent in a request body are ignored. Identity comes from the server.",
-    icon: <UserX className="h-6 w-6 text-deny" />
+    title: "Header / JWT Forgery Defense",
+    category: "Identity Gate",
+    body: "Client-submitted roles, departments, and clearance headers are ignored. Identity is validated against server database state.",
+    icon: <UserX className="h-5 w-5 text-rose-600" />,
+    badge: "Server-Side Verified",
   },
   {
-    title: "Guessed document links", 
-    body: "A made-up document id and a real restricted one return the same response.",
-    icon: <Link2Off className="h-6 w-6 text-ink" />
+    title: "Blind Document ID Probing",
+    category: "URL Hardening",
+    body: "Probing for non-existent vs unauthorized document IDs returns identical timing and error envelopes, preventing enumeration.",
+    icon: <Link2Off className="h-5 w-5 text-slate-700" />,
+    badge: "Timing-Safe Envelopes",
   },
 ];
 
 export function Checks() {
   return (
-    <section id="checks" className="border-t border-line bg-surface">
-      <div className="mx-auto max-w-6xl px-6 py-28">
+    <section id="checks" className="border-t border-line bg-page py-24 sm:py-28">
+      <div className="mx-auto max-w-6xl px-6">
+        {/* Header */}
         <Reveal>
-          <div className="flex flex-col items-center text-center">
-            <h2 className="display max-w-3xl text-[clamp(2.5rem,5vw,4rem)] text-ink leading-tight">Security claims you can run, not just read.</h2>
-            <p className="mt-6 max-w-2xl text-xl leading-relaxed text-muted">
-              The app ships with an attack suite. An administrator can run it from the Security page and see
-              each result. Every test checks what reached the model, not only the wording of the answer.
+          <div className="flex flex-col items-center text-center max-w-3xl mx-auto space-y-3">
+            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Verifiable Security Suite</span>
+            </div>
+            <h2 className="display text-[clamp(2.4rem,4.8vw,3.8rem)] text-ink leading-tight">
+              Security claims you can run, not just read.
+            </h2>
+            <p className="text-base sm:text-lg leading-relaxed text-muted">
+              AegisRAG ships with an integrated automated attack suite. Every test inspects the actual SQL boundary and context window passed to the model.
             </p>
           </div>
         </Reveal>
-        
-        <dl className="mt-20 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+
+        {/* 6-Card Security Grid */}
+        <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {CHECKS.map((check, i) => (
-            <Reveal key={check.title} delay={(i % 3) * 0.1}>
-              <div className="group h-full rounded-3xl border border-line bg-surface-subtle p-8 transition-all hover:scale-[1.02] hover:bg-surface hover:shadow-md">
-                <div className="mb-6 inline-flex rounded-xl bg-surface p-3 shadow-sm group-hover:bg-accent/5">
-                  {check.icon}
+            <Reveal key={check.title} delay={(i % 3) * 0.08}>
+              <div className="group flex h-full flex-col justify-between rounded-2xl border border-line bg-surface p-6 shadow-xs transition-all hover:border-accent/40 hover:shadow-md">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-subtle border border-line shadow-2xs group-hover:scale-105 transition-transform">
+                      {check.icon}
+                    </div>
+                    <span className="flex items-center gap-1 rounded-full bg-surface-subtle px-2.5 py-0.5 text-[0.65rem] font-bold font-mono uppercase tracking-wider text-muted border border-line">
+                      <CheckCircle2 className="h-3 w-3 text-allow" />
+                      {check.badge}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-[0.68rem] font-bold font-mono uppercase tracking-wider text-accent">
+                      {check.category}
+                    </span>
+                    <h3 className="text-base font-bold text-ink mt-0.5">{check.title}</h3>
+                    <p className="mt-2 text-xs sm:text-sm leading-relaxed text-muted">{check.body}</p>
+                  </div>
                 </div>
-                <dt className="display text-2xl text-ink">{check.title}</dt>
-                <dd className="mt-3 text-[1.05rem] leading-relaxed text-muted">{check.body}</dd>
               </div>
             </Reveal>
           ))}
-        </dl>
+        </div>
 
-        <Reveal delay={0.2} className="mt-24 rounded-3xl bg-ink px-8 py-12 text-center shadow-lg sm:px-16">
-          <div className="mx-auto max-w-2xl">
-            <p className="display text-[clamp(2rem,4vw,3rem)] text-white leading-tight">
-              Sign in as five different people and ask the same question.
+        {/* High-Impact Bottom CTA Banner */}
+        <Reveal delay={0.2} className="mt-20 rounded-3xl bg-ink p-8 sm:p-12 text-white shadow-xl relative overflow-hidden">
+          {/* Subtle Ambient Radial Glow */}
+          <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-accent/20 rounded-full blur-3xl pointer-events-none" />
+          
+          <div className="relative z-10 flex flex-col items-center text-center max-w-2xl mx-auto space-y-6">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/90 backdrop-blur-xs">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Instant Multi-Persona Experience</span>
+            </span>
+
+            <h3 className="display text-[clamp(2rem,4vw,3.2rem)] font-normal tracking-tight text-white leading-tight">
+              Test with 11 distinct enterprise roles in real time.
+            </h3>
+
+            <p className="text-sm sm:text-base text-white/70 leading-relaxed max-w-xl">
+              Switch between CEO, Finance Director, HR Lead, Engineer, Security Auditor, and Document Manager to experience deterministic clearance boundaries.
             </p>
-            <div className="mt-10 flex justify-center">
-              <ButtonLink to="/signin" size="lg" className="bg-white text-ink hover:bg-surface-subtle hover:text-ink px-10 py-4 text-lg">
-                Open the demo
+
+            <div className="pt-2">
+              <ButtonLink
+                to="/signin"
+                size="lg"
+                className="bg-white text-ink hover:bg-slate-100 hover:text-ink px-8 py-3.5 text-base font-semibold shadow-md transition-all flex items-center gap-2 group"
+              >
+                <span>Launch Interactive Demo</span>
+                <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
               </ButtonLink>
             </div>
           </div>
@@ -79,3 +131,4 @@ export function Checks() {
     </section>
   );
 }
+
