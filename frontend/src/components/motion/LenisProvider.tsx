@@ -50,7 +50,26 @@ export function LenisProvider({
   };
 
   const scrollTo = (target: string | number | HTMLElement, options?: Record<string, unknown>) => {
-    lenisInstance?.scrollTo(target, options);
+    if (lenisInstance) {
+      lenisInstance.scrollTo(target, options);
+      return;
+    }
+
+    const scroller = scrollerRef?.current;
+    if (typeof target === "number") {
+      if (scroller) {
+        scroller.scrollTo({ top: target, behavior: "smooth" });
+      } else if (typeof window !== "undefined") {
+        window.scrollTo({ top: target, behavior: "smooth" });
+      }
+    } else if (typeof target === "string") {
+      const el = document.querySelector(target);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    } else if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   return (

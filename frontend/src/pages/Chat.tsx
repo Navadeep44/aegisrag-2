@@ -138,6 +138,7 @@ export default function Chat() {
           status: reply.status,
           citations: reply.citations,
           suggested_resource: reply.suggested_resource,
+          isNew: true,
         },
       ]);
       loadSessions();

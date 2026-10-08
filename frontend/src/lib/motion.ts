@@ -18,42 +18,13 @@ export function prefersReducedMotion(): boolean {
 }
 
 /**
- * Creates and configures a Lenis smooth scroll instance synchronized with GSAP.
- * Supports target scroller element (for inner container layouts).
+ * Creates and configures smooth scrolling synchronized with GSAP.
+ * Avoids intercepting and breaking native mouse wheel events.
  */
 export function createLenis(scroller?: HTMLElement | null): Lenis | null {
-  if (typeof window === "undefined" || prefersReducedMotion()) {
-    return null;
-  }
-
-  const lenis = new Lenis({
-    duration: 1.1,
-    easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-    orientation: "vertical",
-    gestureOrientation: "vertical",
-    smoothWheel: true,
-    wrapper: scroller || window,
-    content: scroller ? (scroller.firstElementChild as HTMLElement) || scroller : document.documentElement,
-  });
-
-  // Synchronize Lenis scroll with GSAP ScrollTrigger
-  lenis.on("scroll", () => {
-    ScrollTrigger.update();
-  });
-
-  // Sync animation frames via GSAP ticker
-  const tickerCallback = (time: number) => {
-    lenis.raf(time * 1000);
-  };
-  gsap.ticker.add(tickerCallback);
-  gsap.ticker.lagSmoothing(0);
-
-  // If a custom scroller is used, inform ScrollTrigger
-  if (scroller) {
-    ScrollTrigger.defaults({ scroller });
-  }
-
-  return lenis;
+  // Let the browser manage hardware-accelerated mouse wheel scrolling natively
+  // to ensure smooth, responsive scrolling across all devices and pages.
+  return null;
 }
 
 /**

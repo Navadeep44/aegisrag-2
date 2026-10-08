@@ -4,12 +4,22 @@ from app.models import Document, Chunk
 from app.ingestion import _extract_pdf, process_document, doc_dir
 from app.db import SessionLocal
 
+def _find_file(filename: str) -> Path:
+    p = Path(filename)
+    if p.exists():
+        return p
+    root_p = Path(__file__).resolve().parent.parent.parent / filename
+    if root_p.exists():
+        return root_p
+    return p
+
+
 def test_extract_unbookmarked_pdf_multi_headings():
     """Unbookmarked PDFs with multiple headings on single and across pages extract all sections cleanly."""
     doc = Document(id="test_unbook_1", tenant_id="t_test", filename="test_unbookmarked.pdf", title="Medical Compliance")
     (doc_dir(doc) / "pages").mkdir(parents=True, exist_ok=True)
     
-    sections, sections_meta, unread = _extract_pdf(doc, Path("test_unbookmarked.pdf"))
+    sections, sections_meta, unread = _extract_pdf(doc, _find_file("test_unbookmarked.pdf"))
     
     # Check that multiple headings were found
     headings = [s["heading"] for s in sections_meta]
@@ -29,7 +39,7 @@ def test_extract_enterprise_policy_with_headers_footers():
     doc = Document(id="test_ent_1", tenant_id="t_test", filename="test_enterprise_policy.pdf", title="Safety Manual")
     (doc_dir(doc) / "pages").mkdir(parents=True, exist_ok=True)
     
-    sections, sections_meta, unread = _extract_pdf(doc, Path("test_enterprise_policy.pdf"))
+    sections, sections_meta, unread = _extract_pdf(doc, _find_file("test_enterprise_policy.pdf"))
     
     headings = [s["heading"] for s in sections_meta]
     # Header and footer must NOT be headings
@@ -47,7 +57,7 @@ def test_bookmarked_pdf_extraction():
     doc = Document(id="test_toc_1", tenant_id="t_test", filename="sample_hospital_policy.pdf", title="Hospital Policy")
     (doc_dir(doc) / "pages").mkdir(parents=True, exist_ok=True)
     
-    sections, sections_meta, unread = _extract_pdf(doc, Path("sample_hospital_policy.pdf"))
+    sections, sections_meta, unread = _extract_pdf(doc, _find_file("sample_hospital_policy.pdf"))
     
     headings = [s["heading"] for s in sections_meta]
     assert any("Clinical Protocols" in h or "Section 1" in h for h in headings)

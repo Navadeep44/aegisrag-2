@@ -380,7 +380,7 @@ export default function Documents() {
             className="flex items-center gap-2"
           >
             <Upload className="h-4 w-4" />
-            <span>Upload Document</span>
+            <span>Upload Documents</span>
           </Button>
         )}
       </div>
@@ -1024,15 +1024,15 @@ export default function Documents() {
       <Drawer
         isOpen={uploadDrawerOpen}
         onClose={() => setUploadDrawerOpen(false)}
-        title="Upload Document"
-        subtitle="Ingest PDF, scanned images, Excel or Markdown files with automated pre-indexing security checks."
+        title="Upload Documents"
+        subtitle="Ingest multiple PDF documents or Database records with automated pre-indexing security checks."
       >
         <UploadForm
           roles={roles}
           departments={departments}
           onDone={() => {
             setUploadDrawerOpen(false);
-            showToast("Document uploaded and queued for indexing.", "success");
+            showToast("Documents uploaded and queued for background indexing.", "success");
             load();
           }}
           onCancel={() => setUploadDrawerOpen(false)}

@@ -205,20 +205,27 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                 is_header_footer_heading = is_margin and max_size <= (body_size * 1.05)
 
                 # Heading candidate criteria
-                is_toc_heading = any(t[1].lower() in first_line.lower() or first_line.lower() in t[1].lower() for t in page_toc)
+                is_bare_number = bool(re.match(r"^\s*(\d+(\.\d+)*|[A-Za-z]\.|•|\-|\*)\s*$", first_line))
+                matching_toc = next(
+                    (t[1] for t in page_toc if t[1].lower() in first_line.lower() or first_line.lower() in t[1].lower() or bool(set(ai.tokens(t[1])) & set(ai.tokens(first_line)))),
+                    None
+                )
+                is_toc_heading = matching_toc is not None
                 is_larger = max_size >= (body_size * 1.15)
                 is_bold_title = is_bold and len(first_line) < 120 and not first_line.endswith((".", ",", ";", ":")) and max_size >= body_size
-                is_numbered = bool(re.match(r"^(\d+(\.\d+)*|[A-Z]\.|\b(Chapter|Section|Article|Part)\s+\d+)\b", first_line, re.IGNORECASE)) and len(first_line) < 120
+                is_numbered_title = bool(re.match(r"^(\d+(\.\d+)*|[A-Z]\.|\b(Chapter|Section|Article|Part)\s+\d+)\b\s+[A-Za-z0-9]", first_line, re.IGNORECASE)) and len(first_line) < 120
                 is_all_caps = first_line.isupper() and 4 < len(first_line) < 80 and not first_line.endswith((".", ",", ";", ":")) and max_size >= body_size
 
-                looks_heading = is_toc_heading or (
-                    not is_header_footer_heading
-                    and (is_larger or is_bold_title or is_numbered or is_all_caps)
-                    and (len(lines) == 1 or len(first_line) < 100)
+                looks_heading = not is_bare_number and (
+                    is_toc_heading or (
+                        not is_header_footer_heading
+                        and (is_larger or is_bold_title or is_numbered_title or is_all_caps)
+                        and (len(lines) == 1 or len(first_line) < 100)
+                    )
                 )
 
                 if looks_heading and len(first_line) < 130:
-                    heading_candidate = first_line
+                    heading_candidate = matching_toc if is_toc_heading and matching_toc else first_line
                     # Finalize text buffer for the previous section on this page
                     if current_section_buf:
                         buf_text = "\n\n".join(current_section_buf).strip()
@@ -227,7 +234,7 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                         current_section_buf = []
 
                     current_heading = heading_candidate
-                    level = 1 if max_size >= (body_size * 1.3) or is_numbered else 2
+                    level = 1 if max_size >= (body_size * 1.3) or is_numbered_title else 2
                     if not any(s["heading"].lower() == current_heading.lower() for s in sections_meta):
                         sections_meta.append({
                             "id": f"sec_{sec_counter}",

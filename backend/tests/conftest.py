@@ -52,7 +52,7 @@ def client():
 
 
 @pytest.fixture()
-def db():
+def db(client):
     with SessionLocal() as session:
         yield session
 

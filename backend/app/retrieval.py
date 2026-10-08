@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import cast, func, literal, select
+from sqlalchemy import cast, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app import ai
@@ -20,14 +20,14 @@ class Hit:
 
 def _rank_in_postgres(db: Session, base, query: str, vector: list[float]):
     target = cast(literal(str(vector)), Vector())
-    by_vector = db.execute(base.order_by(Chunk.embedding.op("<=>")(target)).limit(20)).scalars().all()
+    by_vector = db.execute(base.order_by(Chunk.embedding.op("<=>")(target)).limit(25)).scalars().all()
     by_keyword: list[int] = []
     words = re.findall(r"[A-Za-z0-9]+", query)
     if words:
-        tsv = func.to_tsvector("english", Chunk.text)
+        tsv = func.to_tsvector("english", func.concat(Chunk.text, " ", Document.title, " ", func.coalesce(Chunk.section_heading, "")))
         tsq = func.to_tsquery("english", " | ".join(words))
         by_keyword = db.execute(
-            base.where(tsv.op("@@")(tsq)).order_by(func.ts_rank(tsv, tsq).desc()).limit(20)
+            base.where(tsv.op("@@")(tsq)).order_by(func.ts_rank(tsv, tsq).desc()).limit(25)
         ).scalars().all()
     return by_vector, by_keyword
 
@@ -36,26 +36,58 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
     """SQLite has no vector or full-text ranking, so the permission filter runs
     in SQL and only the chunks it lets through are ranked here."""
     rows = db.execute(
-        select(Chunk.id, Chunk.text, Chunk.embedding)
+        select(Chunk.id, Chunk.text, Chunk.embedding, Document.title, Document.filename, Chunk.section_heading)
         .join(Document, Chunk.document_id == Document.id).where(allowed)
     ).all()
 
+    if not rows:
+        return [], []
+
     def cosine(other: list[float]) -> float:
+        if not other:
+            return 0.0
         dot = sum(a * b for a, b in zip(vector, other))
         norm = (sum(a * a for a in vector) ** 0.5) * (sum(b * b for b in other) ** 0.5)
         return dot / norm if norm else 0.0
 
-    by_vector = [r.id for r in sorted(rows, key=lambda r: cosine(r.embedding), reverse=True)[:20]]
+    by_vector = [r[0] for r in sorted(rows, key=lambda r: cosine(r[2]), reverse=True)[:25]]
+    
     wanted = set(ai.tokens(query))
-    overlap = {r.id: len(wanted & set(ai.tokens(r.text))) for r in rows}
-    by_keyword = [i for i in sorted(overlap, key=overlap.get, reverse=True) if overlap[i] > 0][:20]
+    expanded_wanted = set(wanted)
+    for w in wanted:
+        if w in ai.NUM_WORDS:
+            expanded_wanted.update(ai.NUM_WORDS[w])
+        for syn in ai.SYNONYMS.get(w, []):
+            expanded_wanted.add(ai.stem(syn))
+
+    overlap = {}
+    for r in rows:
+        cid, text, _, doc_title, doc_fn, sec_heading = r
+        chunk_tokens = (
+            set(ai.tokens(text))
+            | set(ai.tokens(doc_title or ""))
+            | set(ai.tokens(doc_fn or ""))
+            | set(ai.tokens(sec_heading or ""))
+        )
+        score = len(expanded_wanted & chunk_tokens)
+        
+        # Boost if query explicitly targets the document title
+        doc_title_tokens = set(ai.tokens(doc_title or ""))
+        if doc_title_tokens & wanted:
+            score += 3
+
+        overlap[cid] = score
+
+    by_keyword = [i for i in sorted(overlap, key=overlap.get, reverse=True) if overlap[i] > 0][:25]
     return by_vector, by_keyword
 
 
 def search(db: Session, user: User, query: str, top_k: int | None = None) -> list[Hit]:
     """Hybrid search. The permission filter is part of every SQL statement here,
     so a chunk the user may not read is never ranked, returned or loaded."""
-    top_k = top_k or settings.retrieval_top_k
+    is_broad = bool(re.search(r"\b(all|every|list|show|who are|how many|total|count|records|table|database|give me)\b", query.lower()))
+    default_top_k = max(settings.retrieval_top_k, 20) if is_broad else settings.retrieval_top_k
+    top_k = top_k or default_top_k
     allowed = readable_clause(user)
     base = select(Chunk.id).join(Document, Chunk.document_id == Document.id).where(allowed)
 

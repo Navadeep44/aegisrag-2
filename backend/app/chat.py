@@ -2,14 +2,15 @@ import time
 from collections import defaultdict, deque
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import ai, audit, retrieval
 from app.authorization import readable_document_ids
 from app.config import settings
-from app.models import Conversation, Message, User
+from app.models import Conversation, Document, Message, User
 
-ABSTAIN = "I couldn't find an authorized source for that information."
+NO_AUTHORIZED_DOCS = "NO AUTHORIZED DOCUMENTS FOUND. You do not currently have access permissions to any active documents in this organization. Please contact your administrator or request access to the required documents in the Documents catalog."
 REDACTED = "This answer used sources you can no longer access."
 
 _recent: dict[str, deque] = defaultdict(deque)
@@ -70,9 +71,6 @@ def answer_question(
     conversation_id: str | None,
     briefing_mode: bool = False,
 ) -> dict:
-    from sqlalchemy import select
-    from app.models import Document
-
     conversation = None
     if conversation_id:
         conversation = db.get(Conversation, conversation_id)
@@ -83,6 +81,8 @@ def answer_question(
         db.add(conversation)
         db.flush()
 
+    readable_ids = readable_document_ids(db, user)
+
     hits = retrieval.search(db, user, question)
     evidence = [{"id": h.chunk.id, "title": h.document.title, "page": h.chunk.page,
                  "text": h.chunk.text} for h in hits]
@@ -90,7 +90,7 @@ def answer_question(
 
     valid, dropped, result = [], 0, {"answerable": False, "answer": ""}
     if evidence:
-        history = allowed_history(conversation, readable_document_ids(db, user))
+        history = allowed_history(conversation, readable_ids)
         try:
             result = ai.answer(question, evidence, history)
         except Exception:
@@ -124,7 +124,18 @@ def answer_question(
 
     suggested_resource = None
     if not answered:
-        readable_ids = readable_document_ids(db, user)
+        # Check if user has no authorized documents at all vs no relevant content found
+        if not readable_ids:
+            unanswered_content = NO_AUTHORIZED_DOCS
+        else:
+            accessible_docs = db.query(Document).filter(Document.id.in_(readable_ids)).all()
+            doc_titles = [d.title for d in accessible_docs]
+            titles_preview = ", ".join(doc_titles[:4]) if doc_titles else "None"
+            unanswered_content = (
+                f"I couldn't find information answering that in your authorized documents ({titles_preview}). "
+                "Please verify your question or check if you need access to additional organization resources."
+            )
+
         # Find if an inaccessible document in this tenant might have the answer
         stmt = select(Document).where(
             Document.tenant_id == user.tenant_id,
@@ -142,10 +153,12 @@ def answer_question(
                     "classification": doc.classification,
                 }
                 break
+    else:
+        unanswered_content = ""
 
     db.add(Message(conversation_id=conversation.id, role="user", content=question))
     reply = Message(conversation_id=conversation.id, role="assistant",
-                    content=final_answer if answered else ABSTAIN,
+                    content=final_answer if answered else unanswered_content,
                     status="answered" if answered else "abstained", citations=citations)
     db.add(reply)
     db.commit()

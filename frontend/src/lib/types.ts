@@ -129,6 +129,7 @@ export type Message = {
     title: string;
     classification: number;
   } | null;
+  isNew?: boolean;
 };
 
 export type ChatReply = {
