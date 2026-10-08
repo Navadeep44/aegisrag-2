@@ -164,3 +164,48 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* --- NEW STYLES ADDED --- */
+
+.section-gradient {
+  background: linear-gradient(180deg, var(--color-page) 0%, var(--color-surface) 100%);
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+}
+
+.section-spacer {
+  padding-top: clamp(4rem, 8vw, 7rem);
+  padding-bottom: clamp(4rem, 8vw, 7rem);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+.card-hover {
+  transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
+}
+.card-hover:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.prose-code {
+  font-family: var(--font-mono);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-ink);
+  padding: 0.2em 0.4em;
+  border-radius: var(--radius-sm);
+  font-size: 0.875em;
+}
+
+pre .prose-code {
+  background-color: transparent;
+  padding: 0;
+  color: inherit;
+}
