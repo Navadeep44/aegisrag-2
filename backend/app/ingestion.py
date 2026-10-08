@@ -81,8 +81,22 @@ def delete_files(doc: Document) -> None:
     shutil.rmtree(doc_dir(doc), ignore_errors=True)
 
 
+def normalize_text(text: str) -> str:
+    """Normalizes whitespace, line breaks, removes nulls/replacement chars,
+    and standardizes list/bullet markers into clean markdown '- '."""
+    if not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\xa0", " ").replace("\x00", "")
+    bullet_pattern = r"(?m)^\s*(?:[\ufffd\uf0b7\u2022\u2023\u2043\u2219\u25cb\u25cf\u25d8\u25e6\u25aa\u25ab\u25ac\u25ad\u2013\u2014•▪►▶]|(?:\ufffd\s*[\t\s]+)|\t+)\s*"
+    text = re.sub(bullet_pattern, "- ", text)
+    text = text.replace("\ufffd", "")
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def sanitize(text: str) -> tuple[str, int]:
     """Replace instruction-like sentences in document text. Returns (clean text, count removed)."""
+    text = normalize_text(text)
     removed = 0
     lines = []
     for line in text.split("\n"):
@@ -96,14 +110,21 @@ def sanitize(text: str) -> tuple[str, int]:
 
 
 def split_text(text: str, max_chars: int = 900) -> list[str]:
+    text = normalize_text(text)
     chunks, current = [], ""
     for para in re.split(r"\n\s*\n", text):
         para = para.strip()
         if not para:
             continue
         while len(para) > max_chars:
-            cut = para.rfind(". ", 0, max_chars)
-            cut = cut + 1 if cut > max_chars // 2 else max_chars
+            cut = -1
+            for sep in ["\n- ", "\n• ", "\n* ", ". ", "; ", ", ", " "]:
+                pos = para.rfind(sep, max_chars // 3, max_chars)
+                if pos != -1:
+                    cut = pos + len(sep) if not sep.startswith("\n") else pos
+                    break
+            if cut == -1 or cut <= 0:
+                cut = max_chars
             if current:
                 chunks.append(current)
                 current = ""
@@ -193,16 +214,22 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                 if not lines:
                     continue
 
-                first_line = lines[0]
+                first_line = lines[0].strip()
                 full_block = "\n".join(lines).strip()
 
-                # Running header/footer filtering
+                # Running header/footer / page number filtering
                 bbox = b.get("bbox", (0, 0, 0, 0))
                 is_page_number = bool(re.match(r"^\s*(page\s+\d+(\s+of\s+\d+)?|\d+)\s*$", first_line, re.IGNORECASE))
                 if is_page_number:
                     continue
                 is_margin = bbox[1] < 45 or bbox[3] > (page.rect.height - 45)
                 is_header_footer_heading = is_margin and max_size <= (body_size * 1.05)
+
+                # Footnote detection (small text at page bottom)
+                is_footnote = (bbox[3] > (page.rect.height - 120)) and (max_size < body_size or bool(re.match(r"^\d+\s+[A-Z]", first_line)))
+
+                # Check if block starts with bullet
+                is_bullet = bool(re.match(r"^[\ufffd\uf0b7\u2022\u2023\u2043\u2219\u25cb\u25cf\u25d8\u25e6\u25aa\u25ab\u25ac\u25ad\u2013\u2014•▪►▶\-\*\t]", first_line))
 
                 # Heading candidate criteria
                 is_bare_number = bool(re.match(r"^\s*(\d+(\.\d+)*|[A-Za-z]\.|•|\-|\*)\s*$", first_line))
@@ -212,11 +239,13 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                 )
                 is_toc_heading = matching_toc is not None
                 is_larger = max_size >= (body_size * 1.15)
-                is_bold_title = is_bold and len(first_line) < 120 and not first_line.endswith((".", ",", ";", ":")) and max_size >= body_size
-                is_numbered_title = bool(re.match(r"^(\d+(\.\d+)*|[A-Z]\.|\b(Chapter|Section|Article|Part)\s+\d+)\b\s+[A-Za-z0-9]", first_line, re.IGNORECASE)) and len(first_line) < 120
-                is_all_caps = first_line.isupper() and 4 < len(first_line) < 80 and not first_line.endswith((".", ",", ";", ":")) and max_size >= body_size
+                is_bold_title = is_bold and len(first_line) < 120 and not first_line.endswith((".", ",", ";")) and max_size >= body_size
+                is_numbered_title = not is_footnote and max_size >= body_size and bool(re.match(r"^(\d+(\.\d+)*|[A-Z]\.|\b(Chapter|Section|Article|Part)\s+\d+)\b\s+[A-Za-z0-9]", first_line, re.IGNORECASE)) and len(first_line) < 120
+                
+                clean_fl = first_line.rstrip(":").strip()
+                is_all_caps = clean_fl.isupper() and 3 < len(clean_fl) < 80 and not clean_fl.endswith((".", ",", ";")) and max_size >= (body_size * 0.95)
 
-                looks_heading = not is_bare_number and (
+                looks_heading = not is_bare_number and not is_bullet and not is_footnote and (
                     is_toc_heading or (
                         not is_header_footer_heading
                         and (is_larger or is_bold_title or is_numbered_title or is_all_caps)
@@ -225,10 +254,10 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                 )
 
                 if looks_heading and len(first_line) < 130:
-                    heading_candidate = matching_toc if is_toc_heading and matching_toc else first_line
+                    heading_candidate = matching_toc if is_toc_heading and matching_toc else first_line.rstrip(":").strip()
                     # Finalize text buffer for the previous section on this page
                     if current_section_buf:
-                        buf_text = "\n\n".join(current_section_buf).strip()
+                        buf_text = normalize_text("\n\n".join(current_section_buf))
                         if buf_text:
                             sections.append((number, f"page {number}", buf_text, current_heading))
                         current_section_buf = []
@@ -253,14 +282,14 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
 
             # Append any remaining text buffer on this page
             if current_section_buf:
-                buf_text = "\n\n".join(current_section_buf).strip()
+                buf_text = normalize_text("\n\n".join(current_section_buf))
                 if buf_text:
                     sections.append((number, f"page {number}", buf_text, current_heading))
 
             # If there was visual OCR content on this page
             if visual_desc:
                 vis_content = f"[Visual Content on Page {number}]\n{visual_desc}"
-                sections.append((number, f"page {number}", vis_content, current_heading))
+                sections.append((number, f"page {number}", normalize_text(vis_content), current_heading))
 
     if not sections_meta and sections:
         sections_meta.append({

@@ -34,20 +34,37 @@ export function MessageBubble({
 
     const fullText = message.content;
     let currentIndex = 0;
-    // Step size ensures smooth and snappy typing without making the response feel slow (~0.6 - 1.2s total)
-    const stepSize = Math.max(3, Math.ceil(fullText.length / 50));
+    let timer: NodeJS.Timeout;
 
-    const interval = setInterval(() => {
-      currentIndex = Math.min(currentIndex + stepSize, fullText.length);
+    const streamNext = () => {
+      if (currentIndex >= fullText.length) {
+        setIsTyping(false);
+        return;
+      }
+
+      // Smooth 1 character increment for calm, natural reading speed (or 2 for long texts)
+      const step = fullText.length > 1000 ? 2 : 1;
+      currentIndex = Math.min(currentIndex + step, fullText.length);
       setDisplayedText(fullText.slice(0, currentIndex));
 
-      if (currentIndex >= fullText.length) {
-        clearInterval(interval);
-        setIsTyping(false);
-      }
-    }, 16);
+      const lastChar = fullText[currentIndex - 1];
+      let delay = 20; // Calm, smooth base typing speed (~50 chars/sec)
 
-    return () => clearInterval(interval);
+      // Natural conversational micro-pauses
+      if (lastChar === "." || lastChar === "!" || lastChar === "?") {
+        delay = 65; // Brief pause at sentence boundaries
+      } else if (lastChar === "," || lastChar === ":" || lastChar === ";") {
+        delay = 40; // Slight clause pause
+      } else if (lastChar === "\n") {
+        delay = 55; // Natural newline pause
+      }
+
+      timer = setTimeout(streamNext, delay);
+    };
+
+    timer = setTimeout(streamNext, 120);
+
+    return () => clearTimeout(timer);
   }, [message.content, message.isNew, message.role, reduce]);
 
   const handleCopy = () => {

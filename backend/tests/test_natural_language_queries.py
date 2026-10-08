@@ -184,3 +184,120 @@ def test_multiple_document_upload_and_cross_retrieval(client, db, hospital_tenan
     assert d2["status"] == "answered"
     assert "20%" in d2["answer"]
 
+
+def test_key_takeaways_and_bullet_summary_answering(client, db, hospital_tenant_setup):
+    """When a document chunk has 'KEY TAKEAWAYS:' with bullets, summary/takeaway queries return full bulleted points."""
+    tenant, user, _ = hospital_tenant_setup
+    token_resp = client.post("/api/auth/login", json={"email": user.email, "password": "change-me-demo"})
+    token = token_resp.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    doc_text = (
+        b"RESPONSIBLE DATA SHARING WITH DONORS\n\n"
+        b"KEY TAKEAWAYS:\n\n"
+        b"- Sharing sensitive personal and non-personal data without adequate safeguards can exacerbate risks for crisis-affected people, humanitarian organizations and donors.\n\n"
+        b"- Donors regularly request data from the organizations they fund in order to fulfil their obligations and objectives. Some of these requests relate to sensitive information and data which needs to be protected in order to avoid putting people at risk.\n"
+    )
+
+    res = client.post(
+        "/api/documents/upload",
+        files={"file": ("data_sharing_guidelines.md", doc_text, "text/markdown")},
+        data={"title": "Responsible Data Sharing with Donors", "classification": "1", "grants": json.dumps([{"subject_type": "everyone"}])},
+        headers=headers,
+    )
+    assert res.status_code == 200
+
+    q = client.post("/api/chat/query", json={"question": "summary of key takeaways"}, headers=headers)
+    assert q.status_code == 200
+    d = q.json()
+    assert d["status"] == "answered"
+    assert len(d["citations"]) > 0
+    # Must NOT just be bare 'KEY TAKEAWAYS:'
+    assert "Sharing sensitive personal" in d["answer"]
+    assert "Donors regularly request data" in d["answer"]
+
+
+def test_unmapped_unicode_bullets_and_takeaways_query(db, hospital_tenant_setup):
+    """Verifies that chunks containing unmapped PDF bullet glyphs (e.g. \ufffd\t) are properly cleaned and answered."""
+    tenant, user, _ = hospital_tenant_setup
+
+    raw_text = (
+        "KEY TAKEAWAYS:\n\n"
+        "\ufffd\t Sharing sensitive personal and non-personal data without adequate safeguards can exacerbate risks for crisis-affected people.\n\n"
+        "\ufffd\t Donors regularly request data from the organizations they fund in order to fulfil their obligations.\n\n"
+        "\ufffd\t Common objectives for data sharing include situational awareness and programme design."
+    )
+
+    doc = Document(
+        tenant_id=tenant.id,
+        owner_id=user.id,
+        title="Donor Guidance Note",
+        filename="donor_guidance.txt",
+        kind="text",
+        classification=1,
+        checksum=ingestion.compute_checksum(raw_text.encode("utf-8")),
+        version=1,
+        access=[DocumentAccess(subject_type="everyone")],
+    )
+    db.add(doc)
+    db.commit()
+
+    ingestion.store_original(doc, raw_text.encode("utf-8"))
+    ingestion.process_document(doc.id)
+
+    res = chat.answer_question(db, user, "What are the key takeaways of data sharing?", None)
+    assert res["status"] == "answered"
+    assert "Sharing sensitive personal" in res["answer"]
+    assert "\ufffd" not in res["answer"]
+    assert len(res["citations"]) > 0
+
+
+def test_doctors_csv_queries(db, hospital_tenant_setup):
+    """Verifies doctor CSV record queries (count, list all, specific entity) work accurately."""
+    tenant, user, _ = hospital_tenant_setup
+
+    doctors_csv = (
+        b"doctor_id,first_name,last_name,specialization,phone_number,years_experience,hospital_branch,email\n"
+        b"D001,David,Taylor,Dermatology,8322010158,17,Westside Clinic,dr.david.taylor@hospital.com\n"
+        b"D002,Jane,Davis,Pediatrics,9004382050,24,Eastside Clinic,dr.jane.davis@hospital.com\n"
+        b"D003,David,Jones,Pediatrics,6594221991,28,Central Hospital,dr.david.jones@hospital.com\n"
+    )
+
+    doc = Document(
+        tenant_id=tenant.id,
+        owner_id=user.id,
+        title="Doctors",
+        filename="doctors.csv",
+        kind="database",
+        classification=1,
+        checksum=ingestion.compute_checksum(doctors_csv),
+        version=1,
+        access=[DocumentAccess(subject_type="everyone")],
+    )
+    db.add(doc)
+    db.commit()
+
+    ingestion.store_original(doc, doctors_csv)
+    ingestion.process_document(doc.id)
+
+    # 1. Count query
+    res_count = chat.answer_question(db, user, "How many doctors are there?", None)
+    assert res_count["status"] == "answered"
+    assert "3 doctor records" in res_count["answer"] or "3" in res_count["answer"]
+
+    # 2. Specific entity query
+    res_david = chat.answer_question(db, user, "Give me the details of David", None)
+    assert res_david["status"] == "answered"
+    assert "David Taylor" in res_david["answer"]
+    assert "David Jones" in res_david["answer"]
+
+    # 3. Listing query
+    res_list = chat.answer_question(db, user, "List all doctors", None)
+    assert res_list["status"] == "answered"
+    assert "David" in res_list["answer"]
+    assert "Taylor" in res_list["answer"]
+    assert "Jane" in res_list["answer"]
+    assert "Jones" in res_list["answer"]
+
+
+

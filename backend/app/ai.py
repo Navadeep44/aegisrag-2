@@ -74,6 +74,11 @@ SYNONYMS: dict[str, list[str]] = {
     "season": ["seasons", "seasonal", "yearly", "mam", "ond"],
     "methodology": ["method", "methods", "approach", "technique", "process", "procedure", "note"],
     "precipitation": ["rainfall", "rain", "forecast", "ecmwf"],
+    "summary": ["takeaways", "takeaway", "overview", "highlights", "key", "abstract", "brief", "points", "findings", "recap"],
+    "takeaway": ["takeaways", "summary", "overview", "highlights", "key", "points", "findings", "lessons", "recommendations"],
+    "takeaways": ["takeaway", "summary", "overview", "highlights", "key", "points", "findings", "lessons", "recommendations"],
+    "recommendation": ["recommendations", "advice", "guidance", "guidelines", "suggestions", "points"],
+    "finding": ["findings", "results", "outcomes", "takeaways", "conclusions"],
 }
 
 SYSTEM_PROMPT = """You answer questions for employees using only the evidence provided.
@@ -115,6 +120,11 @@ def stem(w: str) -> str:
         ("operat", "operat"),
         ("threshold", "threshold"),
         ("fraction", "fraction"),
+        ("takeaway", "takeaway"),
+        ("recommend", "recommend"),
+        ("summari", "summar"),
+        ("summary", "summar"),
+        ("finding", "find"),
     ]
     for pfx, replacement in prefixes:
         if w.startswith(pfx):
@@ -161,19 +171,51 @@ def _local_embed(texts: list[str]) -> list[list[float]]:
 
 
 def _sentences(text: str) -> list[str]:
-    """Split into sentences. Short lines without end punctuation (titles, table
-    cells) stand alone; long ones are wrapped prose and join the next line."""
-    units, current = [], ""
-    for line in text.split("\n"):
-        line = line.strip()
+    """Split into cohesive sentences, headers, and bullet points. Continuation lines
+    in bullet points and paragraphs are rejoined before sentence splitting."""
+    if not text:
+        return []
+    bullet_clean_pattern = r"^\s*(?:[\ufffd\uf0b7\u2022\u2023\u2043\u2219\u25cb\u25cf\u25d8\u25e6\u25aa\u25ab\u25ac\u25ad\u2013\u2014•▪►▶]|\ufffd\s*[\t\s]+|\t+)\s*"
+
+    # Step 1: Normalize lines and group multi-line bullet points / paragraphs
+    blocks: list[str] = []
+    current_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = re.sub(bullet_clean_pattern, "- ", raw_line).strip()
+        line = line.replace("\ufffd", "").strip()
         if not line:
+            if current_lines:
+                blocks.append(" ".join(current_lines))
+                current_lines = []
             continue
-        current = f"{current} {line}".strip()
-        if current[-1] in ".!?" or len(line) < 60:
-            units.extend([s.strip() for s in re.split(r"(?<=[.!?])\s+", current) if s.strip()])
-            current = ""
-    if current:
-        units.append(current)
+
+        is_new_bullet = bool(re.match(r"^[-•*]\s+", line) or re.match(r"^\d+\.\s+", line) or re.match(r"^\([a-z0-9ivx]+\)\s+", line, re.IGNORECASE))
+        is_new_header = bool(line.endswith(":") or (len(line) < 60 and not line.endswith((".", ",", ";")) and line.isupper()))
+
+        if is_new_bullet or is_new_header:
+            if current_lines:
+                blocks.append(" ".join(current_lines))
+                current_lines = []
+            current_lines.append(line)
+        else:
+            current_lines.append(line)
+
+    if current_lines:
+        blocks.append(" ".join(current_lines))
+
+    # Step 2: For regular paragraphs, split on sentence boundaries. For bullets & headings, keep as single units.
+    units: list[str] = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        is_bullet = bool(re.match(r"^[-•*]\s+", block) or re.match(r"^\d+\.\s+", block))
+        is_header = bool(block.endswith(":") or (len(block) < 60 and block.isupper()))
+        if is_bullet or is_header:
+            units.append(block)
+        else:
+            sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", block) if s.strip()]
+            units.extend(sents if sents else [block])
     return units
 
 
@@ -238,7 +280,47 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
     q_stems = [stem(w) for w in raw_words]
     q_stem_set = set(q_stems)
 
-    table_title = records[0].get("title", "Dataset")
+    # Group records by dataset/table title
+    records_by_table: dict[str, list[dict]] = {}
+    for r in records:
+        t_name = r.get("title", "Dataset")
+        records_by_table.setdefault(t_name, []).append(r)
+
+    # Determine which table best matches the query
+    best_table_title = records[0].get("title", "Dataset")
+    best_match_score = -1
+    for t_name, table_recs in records_by_table.items():
+        t_cols = list(table_recs[0]["fields"].keys())
+        t_terms = set(tokens(t_name)) | {stem(w) for c in t_cols for w in tokens(c)}
+        if "doctor" in t_name.lower() or "physician" in t_name.lower() or "doctor_id" in t_cols:
+            t_terms.update(["doctor", "physician", "dr"])
+        elif "patient" in t_name.lower() or "patient_id" in t_cols:
+            t_terms.update(["patient", "client", "subject"])
+        elif "appointment" in t_name.lower() or "appointment_id" in t_cols:
+            t_terms.update(["appointment", "schedule", "visit"])
+        elif "billing" in t_name.lower() or "bill_id" in t_cols or "invoice" in t_name.lower():
+            t_terms.update(["bill", "billing", "invoice", "payment", "amount"])
+
+        score = len(q_stem_set & t_terms)
+        if score > best_match_score:
+            best_match_score = score
+            best_table_title = t_name
+
+    target_records = records_by_table.get(best_table_title, records)
+
+    # Deduplicate records by primary key / unique field values
+    seen_keys = set()
+    deduped_records = []
+    for r in target_records:
+        pk_val = next((v for k, v in r["fields"].items() if k.endswith("_id") or k == "id"), None)
+        if not pk_val:
+            pk_val = tuple(sorted(r["fields"].items()))
+        if pk_val not in seen_keys:
+            seen_keys.add(pk_val)
+            deduped_records.append(r)
+    records = deduped_records or target_records
+
+    table_title = best_table_title
     columns = list(records[0]["fields"].keys())
     col_words = {w for c in columns for w in tokens(c)}
 
@@ -247,6 +329,10 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
         entity_name = "Doctor"
     elif "patient" in table_title.lower() or "patient_id" in columns:
         entity_name = "Patient"
+    elif "appointment" in table_title.lower() or "appointment_id" in columns:
+        entity_name = "Appointment"
+    elif "billing" in table_title.lower() or "bill_id" in columns:
+        entity_name = "Billing"
     elif "employee" in table_title.lower() or "employee_id" in columns:
         entity_name = "Employee"
 
@@ -396,10 +482,15 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
         return {"answerable": False, "answer": "", "citations": []}
 
     q_set = set(q_tokens)
-    best_candidate = None
-    best_overall_score = 0.0
+    is_summary_query = bool(re.search(
+        r"\b(summary|takeaway|takeaways|overview|findings|points|highlights|recommendations|key|detail|details|all|list|conclusions|guidelines|notes|what are the)\b",
+        question.lower()
+    ))
 
-    for ev in evidence:
+    best_candidate = None
+    best_overall_score = -1.0
+
+    for rank, ev in enumerate(evidence):
         cid = ev["id"]
         title = ev.get("title", "")
         chunk_text = ev.get("text", "")
@@ -410,6 +501,10 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
             if (t in chunk_tokens or any(stem(syn) in chunk_tokens for syn in SYNONYMS.get(t, []))
                 or any(nw in chunk_tokens for nw in NUM_WORDS.get(t, [])))
         ) / max(len(q_set), 1)
+
+        first_line = chunk_text.splitlines()[0].strip() if chunk_text.splitlines() else ""
+        heading_tokens = set(tokens(first_line))
+        has_heading_match = bool(q_set & heading_tokens) and len(first_line) < 60 and (first_line.endswith(":") or first_line.isupper())
 
         sentences = _sentences(chunk_text)
         scored_sents = []
@@ -434,24 +529,64 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
         scored_sents.sort(key=lambda x: (x[0], x[1]), reverse=True)
         top_sc, top_ol, top_s = scored_sents[0]
 
+        # Composite chunk score
+        chunk_score = (
+            (0.50 * concept_coverage) +
+            (0.35 * top_sc) +
+            (0.20 if has_heading_match else 0.0) +
+            (0.15 / (1.0 + rank))
+        )
+
         if len(q_set) == 1:
             is_chunk_valid = top_sc >= 0.70 and concept_coverage >= 0.70
+        elif len(q_set) == 2:
+            is_chunk_valid = (top_sc >= 0.50 and concept_coverage >= 0.75) or (has_heading_match and concept_coverage >= 0.50)
         else:
-            is_chunk_valid = top_sc >= 0.50 and concept_coverage >= 0.60
-        if is_chunk_valid and top_sc > best_overall_score:
-            best_overall_score = top_sc
-            descriptive = [s for sc, ol, s in scored_sents if len(s) > 35 and title.lower() not in s.lower()]
-            primary = descriptive[0] if descriptive else top_s
-            supporting = [
-                s for sc, ol, s in scored_sents
-                if s != primary and len(s) > 25 and not (len(s) < 35 and title.lower() in s.lower())
-            ][:3]
+            is_chunk_valid = (top_sc >= 0.40 and concept_coverage >= 0.60) or concept_coverage >= 0.75 or (has_heading_match and concept_coverage >= 0.50)
+
+        if is_chunk_valid and chunk_score > best_overall_score:
+            best_overall_score = chunk_score
+
+            first_line_clean = first_line.rstrip(":").strip()
+            is_first_line_header = (
+                len(first_line) < 60 and (
+                    first_line.endswith(":") or
+                    first_line_clean.isupper() or
+                    any(first_line.lower().startswith(pfx) for pfx in ["key takeaway", "summary", "overview", "recommendation", "finding", "key point", "conclusion"])
+                )
+            )
+            is_header_label = (
+                top_s.endswith(":") or
+                (len(top_s.strip()) < 35 and not top_s.strip().endswith((".", "!", "?"))) or
+                any(top_s.lower().strip().startswith(pfx) for pfx in ["key takeaway", "summary", "overview", "recommendation", "finding", "key point", "conclusion"]) or
+                is_first_line_header
+            )
+
+            substantive_in_chunk = [
+                s for s in sentences
+                if s.strip() != top_s.strip() and s.strip() != first_line.strip() and len(s.strip()) > 15 and "ignore all previous" not in s.lower()
+            ]
+
+            if is_header_label and substantive_in_chunk:
+                primary = first_line if is_first_line_header else top_s
+                supporting = substantive_in_chunk
+            elif is_summary_query and len(substantive_in_chunk) >= 2:
+                primary = first_line if is_first_line_header else top_s
+                supporting = substantive_in_chunk
+            else:
+                descriptive = [s for sc, ol, s in scored_sents if len(s) > 35 and title.lower() not in s.lower()]
+                primary = descriptive[0] if descriptive else top_s
+                supporting = [
+                    s for sc, ol, s in scored_sents
+                    if s != primary and len(s) > 25 and not (len(s) < 35 and title.lower() in s.lower())
+                ][:4]
 
             best_candidate = {
                 "cid": cid,
                 "title": title,
                 "primary": primary,
                 "supporting": supporting,
+                "is_header_label": is_header_label,
             }
 
     if not best_candidate:
@@ -459,12 +594,24 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
 
     primary = best_candidate["primary"]
     supporting = best_candidate["supporting"]
-    lines = [f"**Direct Answer**\n{primary}"]
-    if supporting:
-        lines.append("\n**Key Policy Guidelines & Details**")
+    is_header_label = best_candidate.get("is_header_label", False)
+
+    if is_header_label and supporting:
+        hdr_clean = primary.rstrip(":").strip()
+        lines = [f"**Direct Answer**\n**{hdr_clean}:**\n"]
         for s in supporting:
-            clean_s = s.rstrip(".") + "."
+            clean_s = s.lstrip("-•* ").strip()
+            clean_s = clean_s.rstrip(".") + "."
             lines.append(f"- {clean_s}")
+    else:
+        clean_primary = primary.lstrip("-•* ").strip()
+        lines = [f"**Direct Answer**\n{clean_primary}"]
+        if supporting:
+            lines.append("\n**Key Policy Guidelines & Details**")
+            for s in supporting:
+                clean_s = s.lstrip("-•* ").strip()
+                clean_s = clean_s.rstrip(".") + "."
+                lines.append(f"- {clean_s}")
 
     return {
         "answerable": True,
