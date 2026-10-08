@@ -85,8 +85,11 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
 def search(db: Session, user: User, query: str, top_k: int | None = None) -> list[Hit]:
     """Hybrid search. The permission filter is part of every SQL statement here,
     so a chunk the user may not read is never ranked, returned or loaded."""
-    is_broad = bool(re.search(r"\b(all|every|list|show|who are|how many|total|count|records|table|database|give me)\b", query.lower()))
-    default_top_k = max(settings.retrieval_top_k, 20) if is_broad else settings.retrieval_top_k
+    is_broad = bool(re.search(
+        r"\b(all|every|list|show|who are|how many|total|count|records|table|database|give me|average|avg|mean|sum|calculate|calculation|aggregation|aggregate|overall|compare|comparison|statistics|stats|breakdown|highest|lowest|max|min)\b",
+        query.lower()
+    ))
+    default_top_k = max(settings.retrieval_top_k, 25) if is_broad else settings.retrieval_top_k
     top_k = top_k or default_top_k
     allowed = readable_clause(user)
     base = select(Chunk.id).join(Document, Chunk.document_id == Document.id).where(allowed)

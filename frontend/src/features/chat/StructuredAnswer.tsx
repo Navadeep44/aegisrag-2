@@ -11,6 +11,7 @@ import {
   Table,
   Layers,
   Info,
+  Calculator,
 } from "lucide-react";
 import type { Citation } from "../../lib/types";
 
@@ -180,9 +181,11 @@ function MarkdownContent({ text, isTyping }: { text: string; isTyping: boolean }
       trimmed === "**Executive Summary**" ||
       trimmed.startsWith("**Key Policy Guidelines") ||
       trimmed.startsWith("**Key Details") ||
+      trimmed.startsWith("**Calculation & Methodology") ||
       trimmed.startsWith("**Dataset Overview**") ||
       trimmed.startsWith("**Dataset Attributes") ||
-      trimmed.startsWith("**Summary of Records**")
+      trimmed.startsWith("**Summary of Records**") ||
+      (trimmed.startsWith("**") && (trimmed.endsWith("**") || trimmed.endsWith("**:")) && trimmed.length < 80 && !trimmed.slice(2, -2).includes("\n"))
     ) {
       flushParagraph();
 
@@ -203,10 +206,11 @@ function MarkdownContent({ text, isTyping }: { text: string; isTyping: boolean }
         headingTitle = trimmed.replace(/^####\s+/, "");
       } else {
         // Remove bold delimiters
-        headingTitle = trimmed.replace(/^\*\*/, "").replace(/\*\*$/, "").trim();
+        headingTitle = trimmed.replace(/^\*\*/, "").replace(/(\*\*:?|\*\*)$/, "").trim();
       }
 
       const isDirectAnswerHdr = headingTitle.toLowerCase().includes("direct answer") || headingTitle.toLowerCase().includes("executive summary");
+      const isCalcHdr = headingTitle.toLowerCase().includes("calculation") || headingTitle.toLowerCase().includes("methodology") || headingTitle.toLowerCase().includes("formula");
       const isRecordHdr = headingTitle.toLowerCase().includes("record") || headingTitle.toLowerCase().includes("doctor") || headingTitle.toLowerCase().includes("patient");
 
       elements.push(
@@ -215,6 +219,10 @@ function MarkdownContent({ text, isTyping }: { text: string; isTyping: boolean }
             {isDirectAnswerHdr ? (
               <span className="flex h-5 w-5 items-center justify-center rounded-md bg-indigo-100 text-indigo-700">
                 <CheckCircle2 className="h-3.5 w-3.5" />
+              </span>
+            ) : isCalcHdr ? (
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-amber-100 text-amber-800">
+                <Calculator className="h-3.5 w-3.5" />
               </span>
             ) : isRecordHdr ? (
               <span className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-100 text-emerald-700">

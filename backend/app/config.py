@@ -24,11 +24,18 @@ class Settings(BaseSettings):
 
     # "local" needs no API key (keyword-style embeddings, extractive answers, no vision).
     # "openai" talks to any OpenAI-compatible API.
+    # "gemini" talks directly to Google AI Studio REST API.
     ai_provider: str = "local"
     ai_base_url: str = "https://api.openai.com/v1"
     ai_api_key: str = ""
     ai_chat_model: str = ""
     ai_embed_model: str = ""
+
+    # Google AI Studio (Gemini) Settings
+    gemini_api_key: str = ""
+    google_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_model: str = "gemini-1.5-flash"
 
     max_upload_mb: int = 20
     rate_limit_per_minute: int = 20
