@@ -1,3 +1,5 @@
+import logging
+import re
 import time
 from collections import defaultdict, deque
 
@@ -5,15 +7,52 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import ai, audit, retrieval
+from app import ai, audit, retrieval, validator
 from app.authorization import readable_document_ids
 from app.config import settings
 from app.models import Conversation, Document, Message, User
+
+logger = logging.getLogger(__name__)
 
 NO_AUTHORIZED_DOCS = "NO AUTHORIZED DOCUMENTS FOUND. You do not currently have access permissions to any active documents in this organization. Please contact your administrator or request access to the required documents in the Documents catalog."
 REDACTED = "This answer used sources you can no longer access."
 
 _recent: dict[str, deque] = defaultdict(deque)
+
+
+def resolve_coreference(question: str, history: list[dict]) -> str:
+    """Enriches conversational follow-up questions (with pronouns or demonstratives)
+    with entity context from recent conversation turns to maximize retrieval recall."""
+    if not history:
+        return question
+
+    q_lower = question.lower().strip()
+    pronoun_pattern = r"\b(it|its|they|them|their|this|that|these|those|the first|the second|the third|the fourth|the last|former|latter|which one|what about)\b"
+    is_followup = bool(re.search(pronoun_pattern, q_lower)) or len(question.split()) <= 4
+
+    if not is_followup:
+        return question
+
+    # Extract keywords from the most recent user turn or assistant snippet
+    context_tokens = []
+    for msg in reversed(history[-4:]):
+        content = msg.get("content", "")
+        # Filter markdown and noise
+        cleaned = re.sub(r"[#*`\[\]()|\-_]", " ", content)
+        words = [w for w in cleaned.split() if len(w) > 3 and w.lower() not in {
+            "what", "when", "where", "which", "there", "their", "about", "could", "would", "should", "please"
+        }]
+        if words:
+            context_tokens.extend(words[:12])
+            break
+
+    if context_tokens:
+        context_hint = " ".join(dict.fromkeys(context_tokens[:8]))
+        enriched = f"{question} ({context_hint})"
+        logger.info("Enriched query with conversational coreference: '%s' -> '%s'", question, enriched)
+        return enriched
+
+    return question
 
 
 def check_rate_limit(user_id: str) -> None:
@@ -82,20 +121,46 @@ def answer_question(
         db.flush()
 
     readable_ids = readable_document_ids(db, user)
+    history = allowed_history(conversation, readable_ids)
+    retrieval_query = resolve_coreference(question, history)
 
-    hits = retrieval.search(db, user, question)
+    q_analysis = retrieval.parse_query_intent_and_entity(question)
+    hits = retrieval.search(db, user, retrieval_query)
     evidence = [{"id": h.chunk.id, "title": h.document.title, "page": h.chunk.page,
                  "text": h.chunk.text} for h in hits]
     context_ids = {h.chunk.id for h in hits}
 
     valid, dropped, result = [], 0, {"answerable": False, "answer": ""}
     if evidence:
-        history = allowed_history(conversation, readable_ids)
         try:
             result = ai.answer(question, evidence, history)
-        except Exception:
+        except Exception as e:
+            logger.error("AI answering error: %s", e)
             raise HTTPException(502, "The language model did not respond. Check the model settings.")
         valid, dropped = validate_citations(result.get("citations", []), context_ids)
+
+        # Deterministic Answer Validation Layer & Retrieval Expansion Retry
+        val_res = validator.validate_answer(question, result, evidence, q_analysis)
+        if not val_res.valid and val_res.should_retry:
+            logger.info("Validation retry triggered: %s. Expanding retrieval...", val_res.reason)
+            expanded_hits = retrieval.search(db, user, retrieval_query, top_k=50)
+            if len(expanded_hits) > len(hits):
+                hits = expanded_hits
+                evidence = [{"id": h.chunk.id, "title": h.document.title, "page": h.chunk.page,
+                             "text": h.chunk.text} for h in hits]
+                context_ids = {h.chunk.id for h in hits}
+                try:
+                    result = ai.answer(question, evidence, history)
+                    valid, dropped = validate_citations(result.get("citations", []), context_ids)
+                    val_res = validator.validate_answer(question, result, evidence, q_analysis)
+                except Exception as e:
+                    logger.warning("Retry answering failed: %s", e)
+
+        logger.info(
+            "RAG Diagnostics: q='%s' intent=%s entity=%s exp_count=%s ret_count=%d unique_entities=%d valid=%s reason='%s'",
+            question, q_analysis.intent, q_analysis.target_entity, q_analysis.expected_count,
+            len(hits), val_res.entity_count, val_res.valid, val_res.reason
+        )
 
     answered = bool(result.get("answerable") and result.get("answer") and valid)
     by_id = {h.chunk.id: h for h in hits}

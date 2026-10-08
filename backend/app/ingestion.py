@@ -19,6 +19,7 @@ MAGIC = {
     ".jpg": ("image", b"\xff\xd8"),
     ".jpeg": ("image", b"\xff\xd8"),
     ".xlsx": ("xlsx", b"PK"),
+    ".docx": ("docx", b"PK"),
     ".csv": ("database", None),
     ".tsv": ("database", None),
     ".json": ("database", None),
@@ -48,7 +49,7 @@ def validate_upload(filename: str, data: bytes) -> str:
     """Return the document kind, or raise ValueError with a message for the user."""
     ext = Path(filename).suffix.lower()
     if ext not in MAGIC:
-        raise ValueError("Unsupported file type. Upload a PDF, CSV, TSV, JSON database export, XLSX or image file.")
+        raise ValueError("Unsupported file type. Upload a PDF, DOCX, CSV, TSV, JSON database export, XLSX or image file.")
     kind, magic = MAGIC[ext]
     if magic and not data.startswith(magic):
         raise ValueError(f"File content does not match its {ext} extension.")
@@ -286,6 +287,28 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                 if buf_text:
                     sections.append((number, f"page {number}", buf_text, current_heading))
 
+            # Structured Table Extraction via PyMuPDF Table Finder (Preserves Column -> Row -> Value)
+            try:
+                tabs = page.find_tables()
+                if tabs and tabs.tables:
+                    for t_idx, tab in enumerate(tabs.tables, start=1):
+                        raw_table = tab.extract()
+                        if raw_table and len(raw_table) >= 2:
+                            headers = [str(c or f"Col_{i+1}").strip() for i, c in enumerate(raw_table[0])]
+                            md_lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]
+                            rec_lines = []
+                            for r_idx, row in enumerate(raw_table[1:], start=1):
+                                clean_row = [str(c or "").strip() for c in row]
+                                md_lines.append("| " + " | ".join(clean_row) + " |")
+                                pairs = "; ".join(f"{h}: {v}" for h, v in zip(headers, clean_row) if v)
+                                rec_lines.append(f"Record #{r_idx}: {pairs}.")
+                            table_md = "\n".join(md_lines)
+                            records_text = "\n".join(rec_lines)
+                            combined_table_text = f"Table (Page {number}, Table {t_idx}):\n{table_md}\n\nStructured Table Records:\n{records_text}"
+                            sections.append((number, f"page {number}, table {t_idx}", normalize_text(combined_table_text), current_heading))
+            except Exception:
+                pass
+
             # If there was visual OCR content on this page
             if visual_desc:
                 vis_content = f"[Visual Content on Page {number}]\n{visual_desc}"
@@ -440,6 +463,100 @@ def _extract_xlsx(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, 
     return sections, sec_meta, 0
 
 
+def _extract_docx(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, str]], list[dict], int]:
+    """Extracts text, headings, and tables from DOCX files without heavy third-party dependencies."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    sections, sections_meta = [], []
+    current_heading = doc.title or "Overview"
+    buf: list[str] = []
+    sec_counter = 1
+
+    try:
+        with zipfile.ZipFile(path) as z:
+            xml_bytes = z.read("word/document.xml")
+        root = ET.fromstring(xml_bytes)
+
+        body = root.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body")
+        if body is None:
+            body = root
+
+        for child in body:
+            tag = child.tag.split("}")[-1]
+            if tag == "p":
+                p_text = "".join(child.itertext()).strip()
+                if not p_text:
+                    continue
+                is_heading = False
+                pPr = child.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr")
+                if pPr is not None:
+                    pStyle = pPr.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pStyle")
+                    if pStyle is not None:
+                        val = pStyle.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "").lower()
+                        if "heading" in val or "title" in val:
+                            is_heading = True
+                if not is_heading and len(p_text) < 90 and (p_text.isupper() or p_text.endswith(":") or bool(re.match(r"^(Section|Chapter|Part|\d+\.)\s+", p_text, re.IGNORECASE))):
+                    is_heading = True
+
+                if is_heading:
+                    if buf:
+                        sections.append((1, "section", "\n\n".join(buf), current_heading))
+                        buf = []
+                    current_heading = p_text.rstrip(":").strip()
+                    sections_meta.append({
+                        "id": f"sec_{sec_counter}",
+                        "heading": current_heading,
+                        "level": 1,
+                        "page": 1,
+                        "snippet": p_text[:150],
+                        "allowed_roles": [],
+                    })
+                    sec_counter += 1
+                else:
+                    buf.append(p_text)
+
+            elif tag == "tbl":
+                rows = []
+                for tr in child.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr"):
+                    cells = []
+                    for tc in tr.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc"):
+                        c_text = "".join(tc.itertext()).strip()
+                        cells.append(c_text)
+                    if any(cells):
+                        rows.append(cells)
+                if rows:
+                    headers = [c or f"Col_{i+1}" for i, c in enumerate(rows[0])]
+                    md_lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]
+                    rec_lines = []
+                    for r_idx, row in enumerate(rows[1:], start=1):
+                        md_lines.append("| " + " | ".join(row) + " |")
+                        pairs = "; ".join(f"{h}: {v}" for h, v in zip(headers, row) if v)
+                        rec_lines.append(f"Record #{r_idx}: {pairs}.")
+                    tbl_content = f"Table ({current_heading}):\n" + "\n".join(md_lines) + "\n\nStructured Table Records:\n" + "\n".join(rec_lines)
+                    sections.append((1, "table", tbl_content, current_heading))
+
+        if buf:
+            sections.append((1, "section", "\n\n".join(buf), current_heading))
+
+    except Exception as exc:
+        sections.append((1, "doc", f"Could not parse docx: {exc}", current_heading))
+
+    if not sections_meta and sections:
+        sections_meta.append({
+            "id": "sec_1",
+            "heading": current_heading,
+            "level": 1,
+            "page": 1,
+            "snippet": sections[0][2][:150] if sections else "",
+            "allowed_roles": [],
+        })
+
+    preview_text = "\n\n".join(s[2] for s in sections[:3])
+    page_renderer._render_text_document(doc.title or "DOCX Document", preview_text, 1, page_image_path(doc, 1), "Internal")
+    return sections, sections_meta, 0
+
+
 def create_or_update_job(
     db, doc: Document, status: str, stage: str, error_code: str | None = None
 ) -> IngestionJob:
@@ -486,6 +603,8 @@ def process_document(document_id: str) -> None:
                 sections, sections_meta, unread = _extract_image(doc, path)
             elif doc.kind == "xlsx":
                 sections, sections_meta, unread = _extract_xlsx(doc, path)
+            elif doc.kind == "docx":
+                sections, sections_meta, unread = _extract_docx(doc, path)
             else:
                 text_content = path.read_text("utf-8", errors="replace")
                 sections_meta = [{"id": "sec_1", "heading": doc.title or "Text Document", "level": 1, "page": 1, "snippet": text_content[:150], "allowed_roles": []}]
@@ -497,11 +616,13 @@ def process_document(document_id: str) -> None:
             create_or_update_job(db, doc, status="processing", stage="sanitization")
             pieces, removed = [], 0
             for page, location, text, heading in sections:
-                limit = 4000 if doc.kind in ("xlsx", "database") else 900
+                limit = 4000 if doc.kind in ("xlsx", "database") else 1200
                 for part in split_text(text, limit):
                     clean, count = sanitize(part)
                     removed += count
-                    pieces.append((page, location, clean, heading))
+                    breadcrumb = f"[{doc.title} | {heading} | Page {page}]\n"
+                    enriched_text = breadcrumb + clean
+                    pieces.append((page, location, enriched_text, heading))
 
             create_or_update_job(db, doc, status="processing", stage="embedding")
             vectors = ai.embed([p[2] for p in pieces]) if pieces else []
