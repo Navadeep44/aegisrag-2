@@ -171,6 +171,7 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
         body_size = font_counts.most_common(1)[0][0] if font_counts else 10.0
 
         current_heading = doc.title or "Overview"
+        heading_stack: list[tuple[int, str]] = []
         sec_counter = 1
 
         for number, page in enumerate(pdf, start=1):
@@ -234,28 +235,49 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
 
                 # Heading candidate criteria
                 is_bare_number = bool(re.match(r"^\s*(\d+(\.\d+)*|[A-Za-z]\.|•|\-|\*)\s*$", first_line))
-                matching_toc = next(
-                    (t[1] for t in page_toc if t[1].lower() in first_line.lower() or first_line.lower() in t[1].lower() or bool(set(ai.tokens(t[1])) & set(ai.tokens(first_line)))),
-                    None
-                )
+                clean_fl = re.sub(r"[\s\u200b\xa0]+", " ", first_line).rstrip(":").strip()
+
+                # Precise TOC matching
+                matching_toc = None
+                toc_lvl = None
+                if not is_margin and not is_footnote and not clean_fl.endswith((".", ";", ",")):
+                    for lvl, title in page_toc:
+                        c_title = re.sub(r"[\s\u200b\xa0]+", " ", title).strip()
+                        if clean_fl.lower() == c_title.lower():
+                            matching_toc = c_title
+                            toc_lvl = lvl
+                            break
+                        if len(c_title) > 4 and (clean_fl.lower().startswith(c_title.lower()) or c_title.lower().startswith(clean_fl.lower())):
+                            if abs(len(clean_fl) - len(c_title)) <= 15:
+                                matching_toc = c_title
+                                toc_lvl = lvl
+                                break
+                        m1 = re.match(r"^(\d+(?:\.\d+)*)\b", clean_fl)
+                        m2 = re.match(r"^(\d+(?:\.\d+)*)\b", c_title)
+                        if m1 and m2 and m1.group(1) == m2.group(1):
+                            matching_toc = c_title
+                            toc_lvl = lvl
+                            break
+
                 is_toc_heading = matching_toc is not None
-                is_larger = max_size >= (body_size * 1.15)
-                is_bold_title = is_bold and len(first_line) < 120 and not first_line.endswith((".", ",", ";")) and max_size >= body_size
-                is_numbered_title = not is_footnote and max_size >= body_size and bool(re.match(r"^(\d+(\.\d+)*|[A-Z]\.|\b(Chapter|Section|Article|Part)\s+\d+)\b\s+[A-Za-z0-9]", first_line, re.IGNORECASE)) and len(first_line) < 120
-                
-                clean_fl = first_line.rstrip(":").strip()
+                is_numbered_title = not clean_fl.endswith((".", ";", ",")) and max_size >= body_size and bool(re.match(r"^(\d+(\.\d+)*|[A-Z]\.|\b(Chapter|Section|Article|Part)\s+\d+)\b\s+[A-Za-z0-9]", clean_fl, re.IGNORECASE)) and len(clean_fl) < 120
+                is_larger = max_size >= (body_size * 1.15) and not clean_fl.endswith((".", ";", ","))
+                is_bold_title = is_bold and len(clean_fl) < 120 and not clean_fl.endswith((".", ";", ",")) and max_size >= body_size
                 is_all_caps = clean_fl.isupper() and 3 < len(clean_fl) < 80 and not clean_fl.endswith((".", ",", ";")) and max_size >= (body_size * 0.95)
 
-                looks_heading = not is_bare_number and not is_bullet and not is_footnote and (
+                looks_heading = not is_bare_number and not is_bullet and not is_footnote and not is_header_footer_heading and (
                     is_toc_heading or (
-                        not is_header_footer_heading
-                        and (is_larger or is_bold_title or is_numbered_title or is_all_caps)
+                        (is_larger or is_bold_title or is_numbered_title or is_all_caps)
                         and (len(lines) == 1 or len(first_line) < 100)
                     )
                 )
 
                 if looks_heading and len(first_line) < 130:
-                    heading_candidate = matching_toc if is_toc_heading and matching_toc else first_line.rstrip(":").strip()
+                    cand = matching_toc if is_toc_heading else clean_fl
+                    cand = re.sub(r"[\s\u200b\xa0]+", " ", cand).strip()
+                    m_num = re.match(r"^(\d+(?:\.\d+)*)", cand)
+                    level = toc_lvl or (m_num.group(1).count(".") + 1 if m_num else (1 if max_size >= (body_size * 1.35) else 2))
+
                     # Finalize text buffer for the previous section on this page
                     if current_section_buf:
                         buf_text = normalize_text("\n\n".join(current_section_buf))
@@ -263,8 +285,11 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                             sections.append((number, f"page {number}", buf_text, current_heading))
                         current_section_buf = []
 
-                    current_heading = heading_candidate
-                    level = 1 if max_size >= (body_size * 1.3) or is_numbered_title else 2
+                    while heading_stack and heading_stack[-1][0] >= level:
+                        heading_stack.pop()
+                    heading_stack.append((level, cand))
+                    current_heading = " — ".join(h for _, h in heading_stack)
+
                     if not any(s["heading"].lower() == current_heading.lower() for s in sections_meta):
                         sections_meta.append({
                             "id": f"sec_{sec_counter}",
