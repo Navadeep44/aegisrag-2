@@ -16,8 +16,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # Fast models first; a model that is unavailable or out of quota is skipped at once.
-# (gemini-flash-latest is left out: on this tier it takes 25-45 s per answer.)
-FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash"]
+FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"]
 BUDGET_SECONDS = 20  # one generate() call never waits longer than this across all models
 _dead: dict[str, float] = {}  # model -> time it failed with 404/429, skipped for a while
 

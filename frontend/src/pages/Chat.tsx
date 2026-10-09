@@ -47,41 +47,102 @@ const STARTERS: Record<string, Starter[]> = {
 };
 
 const THINKING = [
-  { icon: Fingerprint, label: "Verifying identity" },
-  { icon: Lock, label: "Compiling permission filter into SQL" },
-  { icon: Search, label: "Hybrid search over authorized chunks" },
-  { icon: Sparkles, label: "Drafting from evidence only" },
-  { icon: ShieldCheck, label: "Checking every claim against its source" },
+  { icon: Fingerprint, label: "Verifying identity & clearance" },
+  { icon: Lock, label: "Compiling SQL permission filters" },
+  { icon: Search, label: "Hybrid vector search over authorized chunks" },
+  { icon: Sparkles, label: "Synthesizing answer from verified evidence" },
+  { icon: ShieldCheck, label: "Grounding and citing verified claims" },
 ];
 
 function Thinking() {
-  const [i, setI] = useState(0);
+  const [stepIdx, setStepIdx] = useState(0);
+
   useEffect(() => {
-    const t = setInterval(() => setI((v) => Math.min(v + 1, THINKING.length - 1)), 650);
+    const t = setInterval(() => {
+      setStepIdx((v) => (v < THINKING.length - 1 ? v + 1 : v));
+    }, 600);
     return () => clearInterval(t);
   }, []);
+
+  const currentStep = THINKING[stepIdx];
+  const StepIcon = currentStep.icon;
+
   return (
-    <div className="glass flex items-center gap-4 rounded-2xl p-4" aria-live="polite">
-      <div className="relative grid h-10 w-10 place-items-center">
-        <span className="absolute inset-0 animate-pulse-ring rounded-full bg-accent/30" />
-        <LogoMark className="relative h-8 w-8" />
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.3 }}
+      className="glass relative overflow-hidden rounded-2xl p-4 sm:p-5 shadow-sm"
+      aria-live="polite"
+    >
+      {/* Top subtle ambient beam */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/50 to-transparent" />
+
+      {/* Header with animated logo and current active phase */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="relative grid h-10 w-10 place-items-center rounded-xl bg-accent/10 border border-accent/25">
+            <span className="absolute inset-0 animate-pulse-ring rounded-xl bg-accent/20" />
+            <LogoMark className="relative h-6 w-6 text-accent" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-ink font-mono">
+                Aegis Engine Active
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent animate-ping" />
+                Phase {stepIdx + 1} of {THINKING.length}
+              </span>
+            </div>
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+              <StepIcon className="h-3.5 w-3.5 text-accent animate-spin-slow" />
+              <span className="font-medium text-ink-light transition-all duration-200">
+                {currentStep.label}…
+              </span>
+            </p>
+          </div>
+        </div>
+
+        {/* Phase Pills */}
+        <div className="hidden sm:flex items-center gap-1">
+          {THINKING.map((s, idx) => {
+            const Icon = s.icon;
+            const isDone = idx < stepIdx;
+            const isCurrent = idx === stepIdx;
+            return (
+              <span
+                key={s.label}
+                title={s.label}
+                className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-all duration-300 ${
+                  isDone
+                    ? "border border-allow/30 bg-allow/10 text-allow"
+                    : isCurrent
+                    ? "border border-accent/40 bg-accent/15 text-accent shadow-2xs scale-105"
+                    : "border border-line/60 text-muted-light opacity-50"
+                }`}
+              >
+                <Icon className="h-3 w-3" />
+                <span className="hidden md:inline">{s.label.split(" ")[0]}</span>
+              </span>
+            );
+          })}
+        </div>
       </div>
-      <div className="flex flex-1 flex-wrap gap-1.5">
-        {THINKING.map((s, idx) => {
-          const Icon = s.icon;
-          const state = idx < i ? "done" : idx === i ? "now" : "todo";
-          return (
-            <span key={s.label} title={s.label}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold transition-all ${
-                state === "done" ? "border-allow/30 bg-allow/10 text-allow"
-                  : state === "now" ? "border-accent/50 bg-accent/15 text-accent" : "border-line text-muted-light"}`}>
-              <Icon className="h-3 w-3" />
-              <span className={state === "now" ? "" : "hidden sm:inline"}>{state === "now" ? s.label : s.label.split(" ")[0]}</span>
-            </span>
-          );
-        })}
+
+      {/* Smooth Shimmering Skeleton Answer Preview */}
+      <div className="mt-4 space-y-2.5 pt-2 border-t border-line/60">
+        <div className="h-3.5 w-3/4 rounded-full skeleton" />
+        <div className="h-3 w-full rounded-full skeleton" />
+        <div className="h-3 w-5/6 rounded-full skeleton" />
+        <div className="flex items-center gap-2 pt-1">
+          <div className="h-2.5 w-24 rounded-full skeleton" />
+          <div className="h-2.5 w-16 rounded-full skeleton" />
+          <div className="h-2.5 w-32 rounded-full skeleton" />
+        </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 

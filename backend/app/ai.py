@@ -753,15 +753,16 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
         return {"answerable": True, "answer": "\n".join(lines), "citations": all_cids}
 
     # 1. Count / Aggregation Query
+    entity_desc = "records" if entity_name.lower() in ("record", "records") else f"{entity_name.lower()} records"
     if is_count_query:
+        display_cols = [c for c in columns if any(r["fields"].get(c) not in (None, "", "N/A") for r in records[:15])] or columns[:6]
         lines = [
-            f"**Direct Answer**\nThere are **{len(records)} {entity_name.lower()} records** available in the authorized **{table_title}** dataset.",
-            "\n**Dataset Attributes & Schema**",
+            f"**Direct Answer**\nThere are **{len(records)} {entity_desc}** available in the authorized **{table_title}** dataset.\n",
+            "**Dataset Attributes & Schema**",
             f"- **Total Records**: {len(records)}",
-            f"- **Columns**: {', '.join(k.replace('_', ' ').title() for k in columns)}",
-            "\n**Summary of Records**"
+            f"- **Columns**: {', '.join(k.replace('_', ' ').title() for k in display_cols)}",
+            "\n**Summary of Records**\n",
         ]
-        display_cols = columns[:6]
         header = "| # | " + " | ".join(c.replace('_', ' ').title() for c in display_cols) + " |"
         sep = "|---|" + "|".join("---" for _ in display_cols) + "|"
         lines.extend([header, sep])
@@ -783,10 +784,10 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
         ]
         if matched:
             cids = list(dict.fromkeys(r["chunk_id"] for r in matched))
+            display_cols = [c for c in columns if any(r["fields"].get(c) not in (None, "", "N/A") for r in matched[:15])] or columns[:6]
             lines = [
-                f"**Direct Answer**\nFound **{len(matched)} {gender_label.lower()} {entity_name.lower()}s** in the authorized records:\n",
+                f"**Direct Answer**\nFound **{len(matched)} {gender_label.lower()} {entity_desc}** in the authorized records:\n\n",
             ]
-            display_cols = columns
             header = "| # | " + " | ".join(c.replace('_', ' ').title() for c in display_cols) + " |"
             sep = "|---|" + "|".join("---" for _ in display_cols) + "|"
             lines.extend([header, sep])
@@ -800,7 +801,7 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
     # 3. Specific Entity / Name / ID Search
     if matched_records:
         cids = list(dict.fromkeys(r["chunk_id"] for r in matched_records))
-        lines = [f"**Direct Answer**\nFound **{len(matched_records)} matching {entity_name.lower()} record(s)** in **{table_title}**:"]
+        lines = [f"**Direct Answer**\nFound **{len(matched_records)} matching {entity_desc}** in **{table_title}**:"]
         for r in matched_records:
             first_name = r["fields"].get("first_name", "")
             last_name = r["fields"].get("last_name", "")
@@ -815,10 +816,10 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
 
     # 4. Broad / Listing Query
     if is_all_query or is_table_query:
+        display_cols = [c for c in columns if any(r["fields"].get(c) not in (None, "", "N/A") for r in records[:20])] or columns[:6]
         lines = [
-            f"**Direct Answer**\nHere are all **{len(records)} {entity_name.lower()} records** found in the authorized **{table_title}** dataset:\n",
+            f"**Direct Answer**\nHere are all **{len(records)} {entity_desc}** found in the authorized **{table_title}** dataset:\n\n",
         ]
-        display_cols = columns
         header = "| # | " + " | ".join(c.replace('_', ' ').title() for c in display_cols) + " |"
         sep = "|---|" + "|".join("---" for _ in display_cols) + "|"
         lines.extend([header, sep])

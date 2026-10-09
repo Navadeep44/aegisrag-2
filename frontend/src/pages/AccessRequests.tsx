@@ -89,11 +89,14 @@ export default function AccessRequests() {
 
   const loadData = () => {
     setLoading(true);
-    Promise.all([
+    const promises: Promise<unknown>[] = [
       api<AccessRequest[]>("/access-requests").then(setRequests),
       api<Doc[]>("/documents").then(setDocs),
-      api<User[]>("/users").then(setUsers),
-    ])
+    ];
+    if (canDelegate || isApprover || hasPermission(user, "user.read") || hasPermission(user, "tenant.manage") || hasPermission(user, "role.manage")) {
+      promises.push(api<User[]>("/users").then(setUsers).catch(() => {}));
+    }
+    Promise.all(promises)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };

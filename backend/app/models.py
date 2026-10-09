@@ -95,6 +95,8 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str]] = {
         "document.delete",
         "chat.use",
         "chat.history.read_own",
+        "user.read",
+        "role.read",
     ],
     "security_auditor": [
         "audit.read",
@@ -102,6 +104,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str]] = {
         "document.metadata.read",
         "chat.history.read_own",
         "user.read",
+        "role.read",
     ],
     "hr": [
         "user.read",
@@ -114,9 +117,11 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str]] = {
         "document.content.read",
         "chat.use",
         "chat.history.read_own",
+        "role.read",
     ],
     "department_manager": [
         "user.read",
+        "role.read",
         "document.metadata.read",
         "document.content.read",
         "chat.use",
@@ -124,6 +129,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str]] = {
     ],
     "team_lead": [
         "user.read",
+        "role.read",
         "document.metadata.read",
         "document.content.read",
         "chat.use",

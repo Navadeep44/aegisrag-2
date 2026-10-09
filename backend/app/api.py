@@ -809,7 +809,7 @@ def me(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dic
 
 @router.get("/users")
 def list_users(
-    user: User = Depends(require_any_permission("user.read", "tenant.manage", "role.manage")),
+    user: User = Depends(require_any_permission("user.read", "tenant.manage", "role.manage", "document.grant.manage")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     users = db.execute(select(User).where(User.tenant_id == user.tenant_id).order_by(User.name)).scalars().all()
@@ -935,7 +935,7 @@ def user_effective_access(
 
 @router.get("/roles")
 def list_roles(
-    user: User = Depends(require_any_permission("role.read", "role.manage", "tenant.manage")),
+    user: User = Depends(require_any_permission("role.read", "role.manage", "tenant.manage", "document.grant.manage")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     roles = db.execute(select(Role).where(Role.tenant_id == user.tenant_id).order_by(Role.name)).scalars().all()
@@ -2418,7 +2418,20 @@ def get_department_insights(
 ) -> dict:
     target_dept_id = department_id if (user.is_admin and department_id) else user.department_id
     if not target_dept_id:
-        raise HTTPException(400, "No department associated with this user.")
+        first_dept = db.execute(select(Department).where(Department.tenant_id == user.tenant_id).order_by(Department.name)).scalars().first()
+        if first_dept:
+            target_dept_id = first_dept.id
+        else:
+            return {
+                "department_id": None,
+                "department_name": "General",
+                "member_count": 0,
+                "document_count": 0,
+                "monthly_queries": 0,
+                "members": [],
+                "documents": [],
+                "activities": [],
+            }
     
     dept_record = db.get(Department, target_dept_id)
     if not dept_record:

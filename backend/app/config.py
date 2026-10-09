@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     google_api_key: str = ""
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_model: str = "gemini-2.0-flash"
     gemini_embed_model: str = "gemini-embedding-001"
     embed_dim: int = 768
 

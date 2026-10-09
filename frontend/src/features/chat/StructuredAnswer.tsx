@@ -73,7 +73,17 @@ export function StructuredAnswer({
 }
 
 export function MarkdownContent({ text, isTyping }: { text: string; isTyping: boolean }) {
-  const lines = text.split("\n");
+  // Normalize markdown text to fix joined tables or joined direct answer headers
+  const normalizedText = (text || "")
+    // Break line before table if attached to text: e.g. "... dataset: | # |" -> "... dataset:\n\n| # |"
+    .replace(/([^\n|])\s*(\|[\s\w#]+\|)/g, "$1\n\n$2")
+    // Break line between inline table rows: "| 12,500 || 2 |" or "| 12,500 | | 2 |" -> "| 12,500 |\n| 2 |"
+    .replace(/\|\s*\|\s*([0-9A-Za-z#\s\-_]+)\s*\|/g, "|\n| $1 |")
+    .replace(/\|\s*\|\s*--+/g, "|\n|---")
+    // Fix Direct Answer header with double newline
+    .replace(/\*\*Direct Answer\*\*:?\s*/gi, "**Direct Answer**\n\n");
+
+  const lines = normalizedText.split("\n");
   const elements: React.ReactNode[] = [];
 
   let inCodeBlock = false;
@@ -90,7 +100,7 @@ export function MarkdownContent({ text, isTyping }: { text: string; isTyping: bo
       const pText = currentParagraphLines.join("\n").trim();
       if (pText) {
         elements.push(
-          <div key={`p-${elements.length}`} className="my-1.5 text-sm sm:text-[0.92rem] leading-relaxed text-slate-800">
+          <div key={`p-${elements.length}`} className="my-1.5 text-sm sm:text-[0.92rem] leading-relaxed text-ink-light">
             {currentParagraphLines.map((line, idx) => (
               <React.Fragment key={idx}>
                 {renderInlineFormattedText(line)}
@@ -110,7 +120,6 @@ export function MarkdownContent({ text, isTyping }: { text: string; isTyping: bo
         <RenderTable key={`tbl-${elements.length}`} lines={tableLines} />
       );
     } else if (tableLines.length === 1) {
-      // Not a valid table, treat as normal text
       currentParagraphLines.push(...tableLines);
       flushParagraph();
     }
@@ -214,10 +223,10 @@ export function MarkdownContent({ text, isTyping }: { text: string; isTyping: bo
       const isRecordHdr = headingTitle.toLowerCase().includes("record") || headingTitle.toLowerCase().includes("doctor") || headingTitle.toLowerCase().includes("patient");
 
       elements.push(
-        <div key={`hdr-${elements.length}`} className="pt-3 pb-1">
+        <div key={`hdr-${elements.length}`} className="pt-2.5 pb-1">
           <div className="flex items-center gap-2">
             {isDirectAnswerHdr ? (
-              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-indigo-100 text-indigo-700">
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-accent/15 text-accent border border-accent/25">
                 <CheckCircle2 className="h-3.5 w-3.5" />
               </span>
             ) : isCalcHdr ? (
@@ -229,11 +238,11 @@ export function MarkdownContent({ text, isTyping }: { text: string; isTyping: bo
                 <Layers className="h-3.5 w-3.5" />
               </span>
             ) : (
-              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-slate-700">
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-surface-subtle text-ink">
                 <FileText className="h-3.5 w-3.5" />
               </span>
             )}
-            <h3 className={`font-bold tracking-tight text-slate-900 ${
+            <h3 className={`font-bold tracking-tight text-ink ${
               headingLevel === 1
                 ? "text-lg"
                 : headingLevel === 2
@@ -254,8 +263,8 @@ export function MarkdownContent({ text, isTyping }: { text: string; isTyping: bo
       const bulletText = trimmed.replace(/^[-*•]\s+/, "");
       elements.push(
         <div key={`bullet-${elements.length}`} className="flex items-start gap-2.5 py-1 pl-1 text-sm sm:text-[0.92rem]">
-          <span className="mt-2 h-1.5 w-1.5 rounded-full bg-indigo-600 shrink-0" />
-          <span className="leading-relaxed text-slate-800 flex-1">
+          <span className="mt-2 h-1.5 w-1.5 rounded-full bg-accent shrink-0" />
+          <span className="leading-relaxed text-ink-light flex-1">
             {renderInlineFormattedText(bulletText)}
           </span>
         </div>
@@ -271,10 +280,10 @@ export function MarkdownContent({ text, isTyping }: { text: string; isTyping: bo
       const rest = numMatch[2];
       elements.push(
         <div key={`num-${elements.length}`} className="flex items-start gap-2.5 py-1 pl-1 text-sm sm:text-[0.92rem]">
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-indigo-700 text-[0.7rem] font-bold font-mono border border-indigo-100">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent text-[0.7rem] font-bold font-mono border border-accent/25">
             {num}
           </span>
-          <span className="leading-relaxed text-slate-800 flex-1 pt-0.5">
+          <span className="leading-relaxed text-ink-light flex-1 pt-0.5">
             {renderInlineFormattedText(rest)}
           </span>
         </div>
@@ -287,7 +296,7 @@ export function MarkdownContent({ text, isTyping }: { text: string; isTyping: bo
       flushParagraph();
       const quoteText = trimmed.replace(/^>\s+/, "");
       elements.push(
-        <div key={`quote-${elements.length}`} className="my-2 rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-3.5 text-xs sm:text-sm text-indigo-950 font-medium">
+        <div key={`quote-${elements.length}`} className="my-2 rounded-xl border-l-4 border-accent bg-accent-light/40 p-3.5 text-xs sm:text-sm text-ink font-medium">
           {renderInlineFormattedText(quoteText)}
         </div>
       );
@@ -306,7 +315,7 @@ export function MarkdownContent({ text, isTyping }: { text: string; isTyping: bo
     <div className="space-y-1">
       {elements}
       {isTyping && (
-        <span className="inline-block h-4 w-1.5 ml-1 bg-indigo-600 animate-cursor-blink align-middle rounded-full" />
+        <span className="inline-block h-4 w-1.5 ml-1 bg-accent rounded-full animate-cursor-blink align-middle shadow-[0_0_8px_rgba(15,118,110,0.6)]" />
       )}
     </div>
   );
@@ -327,19 +336,19 @@ function RenderTable({ lines }: { lines: string[] }) {
   const rowLines = lines.slice(startRowIdx);
 
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">
+    <div className="my-3 overflow-hidden rounded-xl border border-line bg-surface shadow-2xs">
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
-            <tr className="bg-slate-50 text-slate-700 font-bold uppercase tracking-wider text-[0.68rem] border-b border-slate-200">
+            <tr className="bg-surface-subtle text-ink font-bold uppercase tracking-wider text-[0.68rem] border-b border-line">
               {headers.map((h, i) => (
-                <th key={i} className="px-3.5 py-2.5 font-mono whitespace-nowrap">
+                <th key={i} className="px-3.5 py-2.5 font-mono whitespace-nowrap text-ink">
                   {h}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-line/60">
             {rowLines.map((rowStr, rIdx) => {
               if (isSeparator(rowStr)) return null;
               const cells = rowStr
@@ -350,9 +359,9 @@ function RenderTable({ lines }: { lines: string[] }) {
               if (cells.length === 0) return null;
 
               return (
-                <tr key={rIdx} className="hover:bg-indigo-50/25 transition-colors">
+                <tr key={rIdx} className="hover:bg-surface-hover/50 transition-colors">
                   {cells.map((cell, cIdx) => (
-                    <td key={cIdx} className="px-3.5 py-2 text-slate-800 text-xs leading-relaxed whitespace-nowrap">
+                    <td key={cIdx} className="px-3.5 py-2.5 text-ink-light text-xs leading-relaxed whitespace-nowrap">
                       {renderInlineFormattedText(cell)}
                     </td>
                   ))}
