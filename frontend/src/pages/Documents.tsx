@@ -37,6 +37,7 @@ import { ClearancePill, StatusPill } from "../components/ui/StatusPill";
 import { AccessEditor } from "../features/documents/AccessEditor";
 import { UploadForm } from "../features/documents/UploadForm";
 import { RowPolicyEditor } from "../features/documents/RowPolicyEditor";
+import { DocumentWorkflowExplainer } from "../features/documents/DocumentWorkflowExplainer";
 import { kindStyle } from "../lib/kinds";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
@@ -72,6 +73,7 @@ export default function Documents() {
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilterTab, setActiveFilterTab] = useState<string>("all");
+  const [showPipelineGuide, setShowPipelineGuide] = useState(false);
 
   // Drawers & Modals
   const [uploadDrawerOpen, setUploadDrawerOpen] = useState(false);
@@ -378,10 +380,45 @@ export default function Documents() {
 
   return (
     <div className="space-y-5 pb-16">
-      <PageHeader icon={FileText} title="Documents" subtitle="Everything indexed, with who can read it."
-        action={canUpload && (
-          <Button onClick={() => setUploadDrawerOpen(true)}><Upload className="h-4 w-4" /> Upload</Button>
-        )} />
+      <PageHeader
+        icon={FileText}
+        title="Documents"
+        subtitle="Enterprise knowledge assets, multi-modal ingestion status, and RBAC policies."
+        action={
+          <div className="flex items-center gap-2">
+            <Button
+              kind="secondary"
+              onClick={() => setShowPipelineGuide(!showPipelineGuide)}
+              className="hidden sm:inline-flex items-center gap-1.5"
+            >
+              <Layers className="h-4 w-4 text-accent" />
+              <span>{showPipelineGuide ? "Hide Pipeline" : "Pipeline Architecture"}</span>
+            </Button>
+            {canUpload && (
+              <Button onClick={() => setUploadDrawerOpen(true)}>
+                <Upload className="h-4 w-4" /> Upload
+              </Button>
+            )}
+          </div>
+        }
+      />
+
+      {/* Interactive Processing Architecture Guide */}
+      <AnimatePresence>
+        {showPipelineGuide && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+            <div className="glass-premium rounded-3xl border border-accent/40 p-6 sm:p-8 shadow-lg">
+              <DocumentWorkflowExplainer showHeading={true} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {error && <Notice tone="error">{error}</Notice>}
 

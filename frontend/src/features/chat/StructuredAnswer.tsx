@@ -29,15 +29,15 @@ export function StructuredAnswer({
   isTyping = false,
 }: StructuredAnswerProps) {
   return (
-    <div className="space-y-4 text-slate-800">
+    <div className="space-y-4 text-ink-light">
       {/* Markdown formatted content */}
       <MarkdownContent text={content} isTyping={isTyping} />
 
       {/* Verified Source Cards (Only shown when not typing or when citations exist) */}
       {!isTyping && citations.length > 0 && (
-        <div className="mt-4 pt-3 border-t border-slate-200/80 space-y-2">
-          <div className="flex items-center gap-1.5 text-[0.7rem] font-bold uppercase tracking-wider text-slate-500 font-mono">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+        <div className="mt-4 pt-3.5 border-t border-line/70 space-y-2">
+          <div className="flex items-center gap-1.5 text-[0.7rem] font-bold uppercase tracking-wider text-muted font-mono">
+            <ShieldCheck className="h-3.5 w-3.5 text-allow shrink-0" />
             <span>Verified Sources ({citations.length})</span>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -46,23 +46,23 @@ export function StructuredAnswer({
                 key={c.chunk_id}
                 type="button"
                 onClick={() => onSelectCitation(c)}
-                className="group flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-700 hover:border-indigo-400 hover:bg-indigo-50/40 hover:text-indigo-950 transition-all shadow-2xs cursor-pointer"
+                className="group flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-left text-xs text-ink hover:border-accent/40 hover:bg-surface-hover/80 hover:text-accent transition-all shadow-2xs cursor-pointer"
               >
-                <BookOpen className="h-3.5 w-3.5 text-indigo-500 group-hover:text-indigo-600 shrink-0" />
+                <BookOpen className="h-3.5 w-3.5 text-accent shrink-0" />
                 <div className="min-w-0">
-                  <p className="font-semibold text-slate-900 group-hover:text-indigo-950 truncate max-w-[220px]">
+                  <p className="font-semibold text-ink group-hover:text-accent truncate max-w-[220px]">
                     {c.title}
                   </p>
                   {c.section_heading && (
-                    <p className="text-[0.68rem] text-slate-500 truncate max-w-[200px]">
+                    <p className="text-[0.68rem] text-muted truncate max-w-[200px]">
                       § {c.section_heading}
                     </p>
                   )}
                 </div>
-                <span className="ml-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[0.65rem] font-mono font-semibold text-slate-600 group-hover:bg-indigo-100 group-hover:text-indigo-700">
+                <span className="ml-1 rounded-md bg-surface-subtle px-1.5 py-0.5 text-[0.65rem] font-mono font-semibold text-muted group-hover:bg-accent/10 group-hover:text-accent">
                   p.{c.page}
                 </span>
-                <ChevronRight className="h-3 w-3 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-transform" />
+                <ChevronRight className="h-3 w-3 text-muted group-hover:text-accent group-hover:translate-x-0.5 transition-transform" />
               </button>
             ))}
           </div>
@@ -385,21 +385,21 @@ function RenderCodeBlock({ code, language }: { code: string; language?: string }
   };
 
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-slate-800 bg-slate-950 text-slate-100 shadow-md">
-      <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/90 px-4 py-2 text-xs">
-        <span className="font-mono text-[0.7rem] uppercase font-semibold text-slate-400">
+    <div className="glass-dark my-3 overflow-hidden rounded-2xl border border-white/10 text-white shadow-md">
+      <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-4 py-2 text-xs">
+        <span className="font-mono text-[0.7rem] uppercase font-semibold text-white/60">
           {language || "code"}
         </span>
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1 text-[0.7rem] text-slate-400 hover:text-white transition-colors"
+          className="flex items-center gap-1 text-[0.7rem] text-white/70 hover:text-white transition-colors"
         >
-          {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? <Check className="h-3.5 w-3.5 text-allow" /> : <Copy className="h-3.5 w-3.5" />}
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </div>
-      <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-slate-200">
+      <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-white/90">
         <code>{code}</code>
       </pre>
     </div>

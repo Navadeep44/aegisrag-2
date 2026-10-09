@@ -1,21 +1,27 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   UploadCloud,
   FileText,
-  Database,
   FileSpreadsheet,
   CheckCircle2,
   X,
-  Trash2,
   Plus,
   AlertCircle,
-  Check,
   RefreshCw,
+  ShieldCheck,
+  Cpu,
+  Lock,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Notice } from "../../components/ui/Notice";
 import { api } from "../../lib/api";
 import { LEVELS, type Department, type Role } from "../../lib/types";
+import { DocumentWorkflowExplainer } from "./DocumentWorkflowExplainer";
 
 interface SelectedFileItem {
   id: string;
@@ -33,6 +39,14 @@ interface UploadFormProps {
   onCancel?: () => void;
 }
 
+const INGESTION_STAGES = [
+  { label: "Validating file binary & SHA-256 checksum", icon: ShieldCheck },
+  { label: "Optical OCR & schema structural extraction", icon: Layers },
+  { label: "Prompt injection & adversarial safety scrub", icon: Lock },
+  { label: "Generating 768-d Gemini vectors & BM25 indices", icon: Cpu },
+  { label: "Compiling SQL RBAC grants & row security rules", icon: Sparkles },
+];
+
 export function UploadForm({
   roles,
   departments = [],
@@ -46,9 +60,23 @@ export function UploadForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
-  const [uploadProgressText, setUploadProgressText] = useState("");
+  const [currentStageIdx, setCurrentStageIdx] = useState(0);
+  const [currentFileIdx, setCurrentFileIdx] = useState(0);
+  const [showArchitectureGuide, setShowArchitectureGuide] = useState(false);
 
   const acceptedExtensions = ".pdf,.csv,.tsv,.json,.sql";
+
+  // Cycle through animated ingestion stages during busy state
+  useEffect(() => {
+    if (!busy) {
+      setCurrentStageIdx(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setCurrentStageIdx((prev) => (prev + 1) % INGESTION_STAGES.length);
+    }, 1800);
+    return () => clearInterval(interval);
+  }, [busy]);
 
   const getCleanTitle = (fileName: string) => {
     return fileName
@@ -69,7 +97,6 @@ export function UploadForm({
         setError(`"${file.name}" has an unsupported format. Allowed: .pdf, .csv, .tsv, .json, .sql`);
         continue;
       }
-      // Avoid duplicate files already in list
       if (selectedFiles.some((f) => f.file.name === file.name && f.file.size === file.size)) {
         continue;
       }
@@ -139,7 +166,7 @@ export function UploadForm({
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const item = selectedFiles[i];
-      setUploadProgressText(`Uploading and ingesting file ${i + 1} of ${totalCount}: ${item.file.name}...`);
+      setCurrentFileIdx(i);
 
       setSelectedFiles((prev) =>
         prev.map((f) => (f.id === item.id ? { ...f, status: "uploading" } : f))
@@ -168,7 +195,6 @@ export function UploadForm({
     }
 
     setBusy(false);
-    setUploadProgressText("");
 
     if (successCount === totalCount) {
       setSelectedFiles([]);
@@ -183,9 +209,10 @@ export function UploadForm({
 
   const totalBytes = selectedFiles.reduce((acc, f) => acc + f.file.size, 0);
   const totalSizeMb = (totalBytes / (1024 * 1024)).toFixed(2);
+  const CurrentStageIcon = INGESTION_STAGES[currentStageIdx].icon;
 
   return (
-    <form onSubmit={uploadAll} className="space-y-5">
+    <form onSubmit={uploadAll} className="space-y-6">
       {/* 1. Drag & Drop Multiple File Upload Zone */}
       <div
         onDragOver={(e) => {
@@ -195,12 +222,12 @@ export function UploadForm({
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
         onClick={() => !busy && fileInputRef.current?.click()}
-        className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center cursor-pointer transition-all ${
+        className={`relative flex flex-col items-center justify-center rounded-3xl border-2 border-dashed p-8 text-center cursor-pointer transition-all duration-300 ${
           isDragOver
-            ? "border-indigo-600 bg-indigo-50/50 scale-[0.99]"
+            ? "border-accent bg-accent/10 scale-[0.99] shadow-md"
             : selectedFiles.length > 0
-            ? "border-indigo-200 bg-indigo-50/20 hover:border-indigo-400"
-            : "border-slate-200 bg-slate-50/50 hover:border-indigo-400 hover:bg-slate-50"
+            ? "border-accent/40 bg-surface-subtle/80 hover:border-accent"
+            : "border-line bg-surface/50 hover:border-accent/50 hover:bg-surface-subtle"
         }`}
       >
         <input
@@ -212,103 +239,101 @@ export function UploadForm({
           onChange={handleFileChange}
         />
 
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-2xs mb-2">
-          <UploadCloud className="h-6 w-6" />
+        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-accent/30 bg-accent/10 text-accent shadow-sm transition-transform group-hover:scale-105">
+          <UploadCloud className="h-7 w-7" />
         </div>
 
-        <p className="text-sm font-semibold text-slate-900">
-          Click to select or drag & drop <span className="text-indigo-600">multiple files</span>
+        <p className="display text-base font-bold text-ink">
+          Select or drag & drop <span className="text-gradient">enterprise documents</span>
         </p>
-        <p className="text-xs text-slate-500 mt-1 max-w-sm">
-          Select multiple PDF documents or Database records (.csv, .tsv, .json, .sql). Up to 25MB per file.
+        <p className="mt-1 max-w-sm text-xs text-muted">
+          Support for searchable PDFs, scans, photos, spreadsheets, and SQL/JSON table exports.
         </p>
 
         {selectedFiles.length > 0 && (
-          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-indigo-100/70 px-3 py-1 text-xs font-semibold text-indigo-800">
+          <div className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-3.5 py-1 text-xs font-semibold text-accent">
             <Plus className="h-3.5 w-3.5" />
-            <span>Click or drag more files to add to batch</span>
+            <span>Add more files to this ingestion batch</span>
           </div>
         )}
       </div>
 
       {/* 2. Selected Files Queue List */}
       {selectedFiles.length > 0 && (
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 font-mono">
-              Selected Documents ({selectedFiles.length}) • {totalSizeMb} MB total
+            <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
+              Batch Queue ({selectedFiles.length}) • {totalSizeMb} MB Total
             </h4>
             {!busy && (
               <button
                 type="button"
                 onClick={() => setSelectedFiles([])}
-                className="text-xs text-rose-600 hover:text-rose-700 hover:underline font-medium"
+                className="text-xs font-semibold text-deny hover:underline"
               >
                 Clear all
               </button>
             )}
           </div>
 
-          <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
-            {selectedFiles.map((item, idx) => {
+          <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+            {selectedFiles.map((item) => {
               const isPdf = item.type === "pdf";
               const sizeKb = (item.file.size / 1024).toFixed(1);
 
               return (
                 <div
                   key={item.id}
-                  className={`flex items-center justify-between gap-3 rounded-xl border p-3 transition-all ${
+                  className={`flex items-center justify-between gap-3 rounded-2xl border p-3.5 transition-all ${
                     item.status === "done"
-                      ? "border-emerald-200 bg-emerald-50/50"
+                      ? "border-allow/40 bg-allow/10"
                       : item.status === "error"
-                      ? "border-rose-200 bg-rose-50/50"
+                      ? "border-deny/40 bg-deny/10"
                       : item.status === "uploading"
-                      ? "border-indigo-300 bg-indigo-50/40 animate-pulse"
-                      : "border-slate-200 bg-white shadow-2xs"
+                      ? "border-accent/50 bg-accent/10 shadow-xs"
+                      : "border-line bg-surface shadow-xs"
                   }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
                     <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${
+                      className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border ${
                         isPdf
-                          ? "bg-rose-50 text-rose-600 border-rose-100"
-                          : "bg-emerald-50 text-emerald-600 border-emerald-100"
+                          ? "border-rose-500/30 bg-rose-500/10 text-rose-600"
+                          : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
                       }`}
                     >
                       {isPdf ? <FileText className="h-5 w-5" /> : <FileSpreadsheet className="h-5 w-5" />}
                     </div>
 
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={item.title}
-                          onChange={(e) => updateTitle(item.id, e.target.value)}
-                          disabled={busy}
-                          placeholder="Document title"
-                          className="w-full text-xs font-semibold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none transition-colors truncate"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2 text-[0.7rem] text-slate-500 font-mono">
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <input
+                        type="text"
+                        value={item.title}
+                        onChange={(e) => updateTitle(item.id, e.target.value)}
+                        disabled={busy}
+                        placeholder="Document title"
+                        className="w-full truncate bg-transparent text-xs font-bold text-ink hover:text-accent focus:outline-none"
+                      />
+                      <div className="flex items-center gap-2 font-mono text-[10px] text-muted">
                         <span className="truncate max-w-[180px]">{item.file.name}</span>
                         <span>•</span>
                         <span>{sizeKb} KB</span>
                         <span>•</span>
-                        <span className="uppercase font-semibold text-slate-600">{item.type}</span>
+                        <span className="uppercase font-semibold text-ink-light">{item.type}</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Status Indicator or Remove Button */}
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex shrink-0 items-center gap-2">
                     {item.status === "uploading" && (
-                      <RefreshCw className="h-4 w-4 animate-spin text-indigo-600" />
+                      <RefreshCw className="h-4 w-4 animate-spin text-accent" />
                     )}
                     {item.status === "done" && (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <CheckCircle2 className="h-4 w-4 text-allow" />
                     )}
                     {item.status === "error" && (
-                      <span className="flex items-center gap-1 text-[0.7rem] text-rose-600 font-medium">
+                      <span className="flex items-center gap-1 text-xs font-semibold text-deny">
                         <AlertCircle className="h-3.5 w-3.5" />
                         <span className="hidden sm:inline">Failed</span>
                       </span>
@@ -317,7 +342,7 @@ export function UploadForm({
                       <button
                         type="button"
                         onClick={() => removeFile(item.id)}
-                        className="rounded-lg p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-100 transition-colors"
+                        className="rounded-lg p-1 text-muted hover:bg-surface-hover hover:text-deny transition-colors"
                         title="Remove file"
                       >
                         <X className="h-4 w-4" />
@@ -332,18 +357,18 @@ export function UploadForm({
       )}
 
       {/* 3. Batch Permissions & Classification Settings */}
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-mono">
-          Batch Access Rules (Applies to all selected files)
+      <div className="glass-premium rounded-2xl border border-line p-4 space-y-3">
+        <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted">
+          Security Classification & Scope
         </h4>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="block text-xs font-medium text-slate-900 mb-1">
+            <label className="mb-1 block text-xs font-semibold text-ink">
               Classification Tier
             </label>
             <select
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink focus:border-accent focus:outline-none"
               value={classification}
               onChange={(e) => setClassification(Number(e.target.value))}
               disabled={busy}
@@ -357,17 +382,17 @@ export function UploadForm({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-900 mb-1">
-              Access Scope
+            <label className="mb-1 block text-xs font-semibold text-ink">
+              Initial Access Grant
             </label>
             <select
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+              className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink focus:border-accent focus:outline-none"
               value={initialGrant}
               onChange={(e) => setInitialGrant(e.target.value)}
               disabled={busy}
             >
-              <option value="">Private (Owner & Granular Roles Only)</option>
-              <option value="*">All Company Members</option>
+              <option value="">Private (Granular Roles Only)</option>
+              <option value="*">All Organization Members</option>
               <optgroup label="Specific Roles">
                 {roles.map((r) => (
                   <option key={r.id} value={`role:${r.id}`}>
@@ -389,43 +414,97 @@ export function UploadForm({
         </div>
       </div>
 
-      {uploadProgressText && (
-        <div className="flex items-center gap-2 text-xs text-indigo-700 font-medium bg-indigo-50 p-3 rounded-lg border border-indigo-100">
-          <RefreshCw className="h-4 w-4 animate-spin text-indigo-600 shrink-0" />
-          <span>{uploadProgressText}</span>
-        </div>
+      {/* Live Ingestion Progress Indicator when busy */}
+      {busy && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass-premium rounded-2xl border border-accent/40 p-4 space-y-3 shadow-md"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CurrentStageIcon className="h-4 w-4 text-accent animate-spin-slow" />
+              <span className="text-xs font-bold text-ink">
+                Ingesting document {currentFileIdx + 1} of {selectedFiles.length}
+              </span>
+            </div>
+            <span className="font-mono text-[10px] text-muted font-bold">
+              Step {currentStageIdx + 1} / {INGESTION_STAGES.length}
+            </span>
+          </div>
+
+          <p className="text-xs text-ink-light transition-all duration-300">
+            {INGESTION_STAGES[currentStageIdx].label}…
+          </p>
+
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle border border-line/60">
+            <motion.div
+              className="h-full bg-gradient-to-r from-accent via-ai to-allow"
+              animate={{ width: `${((currentStageIdx + 1) / INGESTION_STAGES.length) * 100}%` }}
+              transition={{ duration: 0.5 }}
+            />
+          </div>
+        </motion.div>
       )}
 
       {error && <Notice tone="error">{error}</Notice>}
 
       {/* 4. Action Buttons */}
-      <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-200">
-        {onCancel && (
-          <Button type="button" kind="secondary" onClick={onCancel} disabled={busy}>
-            Cancel
-          </Button>
-        )}
-        <Button
-          type="submit"
-          disabled={busy || selectedFiles.length === 0}
-          className="flex items-center gap-2"
+      <div className="flex items-center justify-between gap-3 border-t border-line pt-4">
+        <button
+          type="button"
+          onClick={() => setShowArchitectureGuide(!showArchitectureGuide)}
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-accent transition-colors"
         >
-          {busy ? (
-            <>
-              <RefreshCw className="h-4 w-4 animate-spin" />
-              <span>Ingesting Files...</span>
-            </>
-          ) : (
-            <span>
-              {selectedFiles.length > 1
-                ? `Upload ${selectedFiles.length} Documents`
-                : selectedFiles.length === 1
-                ? "Upload 1 Document"
-                : "Select Documents to Upload"}
-            </span>
+          <Layers className="h-3.5 w-3.5" />
+          <span>{showArchitectureGuide ? "Hide pipeline details" : "How ingestion works"}</span>
+          {showArchitectureGuide ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+
+        <div className="flex items-center gap-2.5">
+          {onCancel && (
+            <Button type="button" kind="secondary" onClick={onCancel} disabled={busy}>
+              Cancel
+            </Button>
           )}
-        </Button>
+          <Button
+            type="submit"
+            disabled={busy || selectedFiles.length === 0}
+            className="flex items-center gap-2"
+          >
+            {busy ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                <span>Processing Pipeline...</span>
+              </>
+            ) : (
+              <span>
+                {selectedFiles.length > 1
+                  ? `Upload & Ingest ${selectedFiles.length} Documents`
+                  : selectedFiles.length === 1
+                  ? "Upload & Ingest 1 Document"
+                  : "Select Documents to Ingest"}
+              </span>
+            )}
+          </Button>
+        </div>
       </div>
+
+      {/* Expandable Architecture Explainer inside drawer */}
+      <AnimatePresence>
+        {showArchitectureGuide && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden pt-2"
+          >
+            <div className="rounded-2xl border border-line bg-surface-subtle p-4">
+              <DocumentWorkflowExplainer compact showHeading={false} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </form>
   );
 }

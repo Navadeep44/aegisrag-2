@@ -297,18 +297,34 @@ def _parse_records_from_evidence(evidence: list[dict]) -> list[dict]:
         # 1. Parse Markdown / Pipe-delimited Table if present
         tbl_lines = [ln for ln in lines if ln.startswith("|") and ln.endswith("|")]
         if len(tbl_lines) >= 2:
-            header_line = tbl_lines[0]
-            headers = [c.strip() for c in header_line.strip("|").split("|")]
-            normalized_headers = [re.sub(r"[^\w]+", "_", h.lower()).strip("_") for h in headers]
-
+            raw_headers = [c.strip() for c in tbl_lines[0].strip("|").split("|")]
             data_start = 1
             if len(tbl_lines) > 1 and re.match(r"^\|(\s*:?-+:?\s*\|)+$", tbl_lines[1]):
                 data_start = 2
+
+            # Check if row 0 was generic ("Col 1", "Col 2", "Column 1", etc.) and the next row is the real header:
+            is_generic_header = all(re.match(r"^(col|column|c)?\s*\d*$", h.lower()) or h in ("#", "") for h in raw_headers)
+            if is_generic_header and data_start < len(tbl_lines):
+                candidate_real_header = [c.strip() for c in tbl_lines[data_start].strip("|").split("|")]
+                if any(re.search(r"[A-Za-z]{2,}", c) for c in candidate_real_header):
+                    raw_headers = candidate_real_header
+                    data_start += 1
+                    if data_start < len(tbl_lines) and re.match(r"^\|(\s*:?-+:?\s*\|)+$", tbl_lines[data_start]):
+                        data_start += 1
+
+            normalized_headers = [re.sub(r"[^\w]+", "_", h.lower()).strip("_") for h in raw_headers]
 
             for idx, row_ln in enumerate(tbl_lines[data_start:], start=1):
                 if re.match(r"^\|(\s*:?-+:?\s*\|)+$", row_ln):
                     continue
                 vals = [c.strip() for c in row_ln.strip("|").split("|")]
+                # Skip if this row is just repeating the headers
+                if any(v.lower() in ("doctor id", "patient id", "employee id", "full name", "monthly base salary", "department / specialty", "license number", "item description") for v in vals):
+                    continue
+                # Skip if row is nearly empty or just N/A
+                non_empty_vals = [v for v in vals if v and v != "N/A" and v != "-"]
+                if len(non_empty_vals) <= 1 and len(vals) > 2:
+                    continue
                 fields = {}
                 for h_norm, val in zip(normalized_headers, vals):
                     if h_norm:
@@ -547,13 +563,20 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
 
     target_records = records_by_table.get(best_table_title, records)
 
-    # Deduplicate records by primary key / unique field values
+    # Deduplicate records by primary key / unique field values, suppressing header echoes
     seen_keys = set()
     deduped_records = []
     for r in target_records:
-        pk_val = next((v for k, v in r["fields"].items() if k.endswith("_id") or k == "id"), None)
+        f = r["fields"]
+        f_vals_lower = [str(v).lower().strip() for v in f.values()]
+        if any(v in ("doctor id", "patient id", "employee id", "full name", "monthly base salary", "department / specialty", "license number", "item description") for v in f_vals_lower):
+            continue
+        valid_vals = [v for v in f.values() if v and str(v).strip() not in ("N/A", "-", "")]
+        if len(valid_vals) <= 1 and len(f) > 2:
+            continue
+        pk_val = next((v for k, v in f.items() if (k.endswith("_id") or k == "id") and str(v).strip() not in ("", "N/A")), None)
         if not pk_val:
-            pk_val = tuple(sorted(r["fields"].items()))
+            pk_val = tuple(sorted((k, str(v)) for k, v in f.items() if str(v).strip() not in ("", "N/A")))
         if pk_val not in seen_keys:
             seen_keys.add(pk_val)
             deduped_records.append(r)
