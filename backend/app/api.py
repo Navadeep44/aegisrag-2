@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -14,7 +15,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app import audit, chat, ingestion, page_renderer, retrieval
+from app import audit, chat, ingestion, page_renderer, retrieval, row_security
 from app.auth import (
     current_user,
     hash_password,
@@ -217,6 +218,12 @@ class SectionAccessIn(BaseModel):
     allowed_roles: list[str] = Field(default_factory=list)
 
 
+class RowPolicyIn(BaseModel):
+    column: str | None = Field(default=None, max_length=200)
+    subject_type: str = Field(default="department", pattern="^(department|role)$")
+    full_access_roles: list[str] = Field(default_factory=list)
+
+
 class SupportAccessIn(BaseModel):
     tenant_id: str
     reason: str
@@ -267,6 +274,7 @@ def doc_out(d: Document, with_access: bool = False, labels: dict | None = None) 
         "created_at": iso(d.created_at),
         "sections_metadata": d.sections_metadata or [],
         "data_schema": d.data_schema,
+        "row_policy": d.row_policy,
     }
     if with_access:
         labels = labels or {}
@@ -1315,6 +1323,11 @@ def update_section_access(
         for c in chunks:
             c.allowed_roles = list(body.allowed_roles)
             flag_modified(c, "allowed_roles")
+        # Enforced in SQL through chunk_access (authorization.chunk_rule_clause).
+        role_ids = row_security.resolve_roles(db, user.tenant_id, list(body.allowed_roles))
+        if body.allowed_roles and not role_ids:
+            role_ids = ["__nobody__"]
+        row_security.set_chunk_roles(db, [c.id for c in chunks], role_ids)
 
     db.commit()
     audit.log(
@@ -1456,6 +1469,89 @@ def page_image(
     return FileResponse(path, media_type="image/png")
 
 
+@router.get("/documents/{document_id}/pages/{page}/highlights")
+def page_highlights(
+    document_id: str,
+    page: int,
+    q: str = "",
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Boxes (0-1 page coordinates) around the cited sentence on a PDF page, so a
+    citation opens on the exact words it relies on. Same 404 rule as page images."""
+    if not can_read(db, user, document_id):
+        raise HTTPException(404, "Document not found.")
+    doc = db.get(Document, document_id)
+    q = re.sub(r"\s+", " ", q or "").strip()[:400]
+    if not doc or doc.kind != "pdf" or len(q) < 4:
+        return {"rects": []}
+    path = ingestion.doc_dir(doc) / ("original" + Path(doc.filename).suffix.lower())
+    try:
+        import pymupdf
+        with pymupdf.open(path) as pdf:
+            if not 1 <= page <= len(pdf):
+                return {"rects": []}
+            pg = pdf[page - 1]
+            found = pg.search_for(q)
+            if not found:
+                words = q.split()
+                for i in range(0, len(words), 6):
+                    piece = " ".join(words[i : i + 6])
+                    if len(piece) > 6:
+                        found += pg.search_for(piece)
+            w, h = pg.rect.width, pg.rect.height
+            return {"rects": [[r.x0 / w, r.y0 / h, r.x1 / w, r.y1 / h] for r in found[:40]]}
+    except Exception:
+        return {"rects": []}
+
+
+@router.put("/documents/{document_id}/row-policy")
+def update_row_policy(
+    document_id: str,
+    body: RowPolicyIn,
+    user: User = Depends(require_any_permission("document.grant.manage", "tenant.manage")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Row-level security for structured records: each row is visible only to the
+    department (or role) named in one column; full-access roles see every row.
+    Enforced inside the retrieval SQL through chunk_access."""
+    doc = _tenant_document(db, user, document_id)
+    if doc.kind not in ("database", "xlsx"):
+        raise HTTPException(400, "Row rules apply to structured records (CSV, JSON, XLSX).")
+    columns = (doc.data_schema or {}).get("columns", [])
+    if body.column and body.column not in columns:
+        raise HTTPException(400, "Unknown column.")
+    doc.row_policy = body.model_dump() if body.column else None
+    db.commit()
+    stats = row_security.apply_row_policy(db, doc)
+    audit.log(db, user.tenant_id, user.id, "document.row_policy_update", "allowed",
+              document_id=doc.id, column=body.column, subject_type=body.subject_type)
+    return {"status": "ok", "row_policy": doc.row_policy, **stats}
+
+
+@router.get("/system/pipeline")
+def pipeline_info(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    """What the RAG pipeline is running on, for the UI's architecture view."""
+    from app import llm
+    from app.db import IS_SQLITE
+    from app.models import ChunkAccess, Record
+    tenant_chunks = select(Chunk.id).where(Chunk.tenant_id == user.tenant_id)
+    return {
+        "provider": "gemini" if llm.enabled() else settings.ai_provider,
+        "chat_model": settings.gemini_model if llm.enabled() else (settings.ai_chat_model or "local-extractive"),
+        "embed_model": settings.gemini_embed_model if llm.enabled() else (settings.ai_embed_model or "local-hash-256"),
+        "embed_dim": settings.embed_dim if llm.enabled() else 256,
+        "vector_store": "SQLite + in-process cosine/BM25" if IS_SQLITE else "PostgreSQL pgvector + tsvector",
+        "ocr": ["gemini-vision"] * llm.enabled() + (["rapidocr"] if settings.local_ocr else []),
+        "documents": db.execute(select(func.count(Document.id)).where(Document.tenant_id == user.tenant_id,
+                                                                     Document.status == "active")).scalar_one(),
+        "chunks": db.execute(select(func.count()).select_from(tenant_chunks.subquery())).scalar_one(),
+        "records": db.execute(select(func.count(Record.id)).where(Record.tenant_id == user.tenant_id)).scalar_one(),
+        "row_rules": db.execute(select(func.count(func.distinct(ChunkAccess.chunk_id)))
+                                .where(ChunkAccess.chunk_id.in_(tenant_chunks))).scalar_one(),
+    }
+
+
 # ---------- chat ----------
 
 @router.post("/chat/query")
@@ -1494,10 +1590,12 @@ def chat_session(
     if not conversation or conversation.user_id != user.id:
         raise HTTPException(404, "Conversation not found.")
     readable = readable_document_ids(db, user)
+    cited = {c.get("chunk_id") for m in conversation.messages for c in (m.citations or []) if c.get("chunk_id")}
     return {
         "id": conversation.id,
         "title": conversation.title,
-        "messages": chat.visible_messages(conversation.messages, readable),
+        "messages": chat.visible_messages(conversation.messages, readable,
+                                          chat.readable_chunk_ids(db, user, cited)),
     }
 
 
@@ -1531,12 +1629,29 @@ def simulate(
         if hit.document.id not in seen:
             seen.add(hit.document.id)
             matches.append({"document_id": hit.document.id, "title": hit.document.title, "page": hit.chunk.page})
+    # Row-level view for structured records the user can open: how many rows the SQL rule lets through.
+    from app.authorization import readable_chunk_clause
+    from app.models import Record
+    row_access = []
+    for row in searchable:
+        d = next(x for x in docs if x.id == row["document_id"])
+        if d.kind not in ("database", "xlsx"):
+            continue
+        total = db.execute(select(func.count(Record.id)).where(Record.document_id == d.id)).scalar_one()
+        visible = db.execute(select(func.count(Record.id)).join(Chunk, Chunk.id == Record.chunk_id)
+                             .join(Document, Document.id == Record.document_id)
+                             .where(Record.document_id == d.id, readable_chunk_clause(target))).scalar_one()
+        rule = d.row_policy or {}
+        row_access.append({"document_id": d.id, "title": d.title, "visible_rows": visible, "total_rows": total,
+                           "rule": f"Rows filtered by {rule['column']} ({rule.get('subject_type', 'department')})"
+                           if rule.get("column") else "No row rule"})
     audit.log(db, admin.tenant_id, admin.id, "policy.simulate", "allowed", target_user_id=target.id)
     return {
         "user": user_out(target),
         "matches": matches,
         "searchable": searchable,
         "excluded": excluded,
+        "row_access": row_access,
     }
 
 

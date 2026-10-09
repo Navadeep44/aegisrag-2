@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { User, Shield, KeyRound, LogOut, Search, Building2, Mail, CheckCircle2 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
+import { UserRound as UserRoundIcon } from "lucide-react";
 import { SectionCard } from "../components/ui/SectionCard";
 import { Button } from "../components/ui/Button";
 import { StatusPill, RolePill, ClearancePill } from "../components/ui/StatusPill";
@@ -29,8 +30,9 @@ export default function Profile() {
   return (
     <div className="space-y-8 pb-12">
       <PageHeader
+        icon={UserRoundIcon}
         title="My Profile"
-        subtitle="Your identity details, organization membership, clearance tier, and computed permissions."
+        subtitle="Identity, clearance and permissions."
       />
 
       <div className="grid gap-6 md:grid-cols-2">

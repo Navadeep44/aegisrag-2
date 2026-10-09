@@ -35,7 +35,12 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     google_api_key: str = ""
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_embed_model: str = "gemini-embedding-001"
+    embed_dim: int = 768
+
+    # Offline OCR (RapidOCR) for scans and images when no vision model answers.
+    local_ocr: bool = True
 
     max_upload_mb: int = 20
     rate_limit_per_minute: int = 20
@@ -43,3 +48,6 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+# A relative storage path means "relative to backend/", wherever the server was started from.
+if not Path(settings.file_storage_dir).is_absolute():
+    settings.file_storage_dir = (ENV_FILE.parent / settings.file_storage_dir).resolve().as_posix()

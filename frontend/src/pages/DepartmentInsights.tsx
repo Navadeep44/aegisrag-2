@@ -11,6 +11,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
+import { Building2 as Building2Icon } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { StatCard } from "../components/ui/StatCard";
 import { TableSkeleton } from "../components/ui/Skeleton";
@@ -47,8 +48,9 @@ export default function DepartmentInsights() {
     <div className="space-y-8 pb-16">
       {/* 1. Page Header with Single Primary Action */}
       <PageHeader
+        icon={Building2Icon}
         title={`${deptName} Department`}
-        subtitle="Department team membership, shared knowledge collections, and operational query activity."
+        subtitle="Members, shared docs and activity."
         action={
           <div className="flex items-center gap-2.5">
             <Link to="/app/access-requests">

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { PageHeader } from "../components/ui/PageHeader";
+import { Globe as GlobeIcon } from "lucide-react";
 import { SectionCard } from "../components/ui/SectionCard";
 import { inputClass } from "../components/ui/field";
 import { useToast } from "../components/ui/Toast";
@@ -115,8 +116,9 @@ export default function RolePortalsHub() {
   return (
     <div className="space-y-8 pb-12">
       <PageHeader
+        icon={GlobeIcon}
         title="Role Portals & Team Assignment"
-        subtitle="Dedicated login URLs for each role in your organization. Distribute credentials and URLs directly to your team."
+        subtitle="One sign-in link per role."
         action={
           <Button onClick={() => setShowAddRoleModal(true)}>
             <Plus className="h-4 w-4 mr-1.5" />

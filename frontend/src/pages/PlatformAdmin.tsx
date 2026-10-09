@@ -14,6 +14,7 @@ import {
 import { Button } from "../components/ui/Button";
 import { Notice } from "../components/ui/Notice";
 import { PageHeader } from "../components/ui/PageHeader";
+import { Cpu as CpuIcon } from "lucide-react";
 import { SectionCard } from "../components/ui/SectionCard";
 import { StatCard } from "../components/ui/StatCard";
 import { StatusPill } from "../components/ui/StatusPill";
@@ -299,8 +300,9 @@ export default function PlatformAdmin() {
     <div className="space-y-8 pb-12">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <PageHeader
-          title="Platform Administration"
-          subtitle="Global tenant lifecycle, infrastructure health, operational metrics, and privileged oversight."
+          icon={CpuIcon}
+        title="Platform Administration"
+          subtitle="Tenants, health and oversight."
         />
         {activeTab === "tenants" && (
           <div className="flex items-center gap-2">

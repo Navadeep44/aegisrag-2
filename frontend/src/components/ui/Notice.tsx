@@ -1,31 +1,16 @@
 import type { ReactNode } from "react";
-import { AlertCircle, Info } from "lucide-react";
+import { AlertTriangle, Info } from "lucide-react";
 
-export function Notice({
-  tone,
-  children,
-  className = "",
-}: {
-  tone: "error" | "info";
-  children: ReactNode;
-  className?: string;
-}) {
+export function Notice({ tone, children, className = "" }: { tone: "error" | "info"; children: ReactNode; className?: string }) {
   const isError = tone === "error";
-
   return (
     <div
       role={isError ? "alert" : "status"}
-      className={`flex items-start gap-2.5 rounded-xl border p-3.5 text-xs sm:text-sm leading-relaxed ${
-        isError
-          ? "border-deny-border bg-deny-bg text-deny"
-          : "border-line bg-surface text-muted"
+      className={`flex items-start gap-2.5 rounded-xl border p-3 text-sm ${
+        isError ? "border-deny-border bg-deny-bg text-deny" : "border-accent/25 bg-accent/5 text-ink-light"
       } ${className}`}
     >
-      {isError ? (
-        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-deny" />
-      ) : (
-        <Info className="h-4 w-4 shrink-0 mt-0.5 text-sky-600" />
-      )}
+      {isError ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <Info className="mt-0.5 h-4 w-4 shrink-0 text-accent" />}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );

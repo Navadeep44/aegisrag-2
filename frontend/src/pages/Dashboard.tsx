@@ -2,314 +2,165 @@ import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  Sparkles,
-  Upload,
-  KeyRound,
-  ShieldCheck,
-  ArrowRight,
-  Shield,
-  FileText,
-  Users,
-  Search,
-  Globe,
+  ArrowRight, ArrowUp, Ban, Cpu, Database, FileStack, KeyRound, Layers, Lock, MessageSquareText, ScanLine,
+  ShieldCheck, SlidersHorizontal, Sparkles, Upload, Users, type LucideIcon,
 } from "lucide-react";
-import { Button } from "../components/ui/Button";
+import { StatCard } from "../components/ui/StatCard";
 import { ClearancePill, RolePill } from "../components/ui/StatusPill";
 import { Notice } from "../components/ui/Notice";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import { DashboardStats, hasPermission } from "../lib/types";
+import { hasPermission, LEVELS, type DashboardStats, type PipelineInfo } from "../lib/types";
 
-// Animation variants
-const containerVariants = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.1
-    }
-  }
-};
+const LEVEL_BAR = ["bg-level-0", "bg-level-1", "bg-level-2", "bg-level-3"];
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
-};
+type Action = { to: string; icon: LucideIcon; label: string; show: boolean };
 
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [info, setInfo] = useState<PipelineInfo | null>(null);
   const [error, setError] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const roles = user?.roles || [];
-  const isAdmin = user?.is_admin || roles.includes("admin");
-  const isOwner = roles.includes("organization_owner");
-  const isIamAdmin = roles.includes("iam_admin");
-  const isAuditor = roles.includes("security_auditor");
-
-  const canUpload = hasPermission(user, "document.upload");
-  const canAssign = hasPermission(user, "role.assign");
-  const canManageRoles = isAdmin || isOwner || isIamAdmin;
+  const [q, setQ] = useState("");
 
   useEffect(() => {
-    setLoading(true);
-    api<DashboardStats>("/dashboard/stats")
-      .then(setStats)
-      .catch((err) => setError((err as Error).message))
-      .finally(() => setLoading(false));
+    api<DashboardStats>("/dashboard/stats").then(setStats).catch((e) => setError((e as Error).message));
+    api<PipelineInfo>("/system/pipeline").then(setInfo).catch(() => {});
   }, []);
 
   if (!user) return null;
+  const roles = user.roles || [];
+  const admin = user.is_admin || roles.includes("admin") || roles.includes("organization_owner");
+  const counts = stats?.classification_counts;
+  const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
 
-  const firstName = user.name.split(" ")[0];
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    navigate(`/app/ask?q=${encodeURIComponent(searchQuery.trim())}`);
-  };
-
-  const starterPrompts = [
-    "What are our standard operating guidelines?",
-    "Summarize the latest compliance directives",
-    "What are the emergency protocols?",
-  ];
+  const actions: Action[] = [
+    { to: "/app/ask", icon: Sparkles, label: "Ask", show: true },
+    { to: "/app/documents", icon: FileStack, label: "Documents", show: true },
+    { to: "/app/documents", icon: Upload, label: "Upload", show: hasPermission(user, "document.upload") },
+    { to: "/app/access-requests", icon: KeyRound, label: "Access", show: true },
+    { to: "/app/simulator", icon: SlidersHorizontal, label: "Simulate", show: admin || hasPermission(user, "policy.simulate") },
+    { to: "/app/security", icon: ShieldCheck, label: "Security", show: admin || hasPermission(user, "audit.read") },
+    { to: "/app/users-and-roles", icon: Users, label: "Team", show: admin || hasPermission(user, "user.invite") },
+  ].filter((a) => a.show);
 
   return (
-    <div className="space-y-10 pb-16 max-w-6xl mx-auto">
-      {/* 1. Header & Identity Card */}
-      <div className="rounded-2xl border border-line bg-surface p-6 sm:p-8 shadow-sm flex flex-wrap items-center justify-between gap-6 relative overflow-hidden">
-        {/* Decorative Background Element */}
-        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-accent opacity-5 rounded-full blur-3xl pointer-events-none"></div>
-        
-        <div className="space-y-2 relative z-10">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl sm:text-3xl font-bold text-ink tracking-tight">
-              Hello, {firstName}
-            </h1>
-            <ClearancePill clearance={user.clearance} label={user.clearance_label} />
-            {roles.slice(0, 1).map((r) => (
-              <RolePill key={r} role={r} />
-            ))}
+    <div className="space-y-6 pb-12">
+      {/* Identity + ask */}
+      <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-[2rem] border border-line bg-gradient-to-br from-accent-light via-surface to-ai-light p-6 shadow-sm sm:p-8">
+        <div className="grid-bg absolute inset-0 opacity-50" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-muted">{user.tenant}</p>
+            <h1 className="display text-3xl text-ink sm:text-4xl">Hi, {user.name.split(" ")[0]}</h1>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <ClearancePill clearance={user.clearance} label={user.clearance_label} />
+              {roles.slice(0, 3).map((r) => <RolePill key={r} role={r} />)}
+            </div>
           </div>
-          <p className="text-sm text-muted font-medium">
-            {user.tenant || "Enterprise Workspace"}
-          </p>
+          {stats && (
+            <div className="flex items-center gap-3 rounded-2xl border border-line bg-surface/80 px-4 py-3">
+              <Lock className="h-8 w-8 text-accent" strokeWidth={1.6} />
+              <div>
+                <p className="display text-2xl text-ink">{stats.accessible_documents ?? 0}<span className="text-sm text-muted"> / {stats.total_documents ?? 0}</span></p>
+                <p className="text-[11px] text-muted">documents in your scope</p>
+              </div>
+            </div>
+          )}
         </div>
-
-        <Link to="/app/ask" className="relative z-10">
-          <Button kind="primary" className="flex items-center gap-2 shadow-sm bg-accent hover:bg-accent-hover text-surface cursor-pointer py-2.5 px-5">
-            <Sparkles className="h-4.5 w-4.5" />
-            <span className="font-semibold">Ask AI</span>
-          </Button>
-        </Link>
-      </div>
+        <form onSubmit={(e) => { e.preventDefault(); if (q.trim()) navigate(`/app/ask?q=${encodeURIComponent(q.trim())}`); }}
+          className="relative mt-6 flex items-center gap-2 rounded-2xl border border-line bg-surface p-2 shadow-sm focus-within:border-accent/50">
+          <Sparkles className="ml-2 h-5 w-5 text-ai" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about anything you're cleared to see…"
+            className="flex-1 bg-transparent px-2 py-2.5 text-sm text-ink placeholder:text-muted-light focus:outline-none" />
+          <button className="btn-primary grid h-10 w-10 place-items-center rounded-xl" aria-label="Ask"><ArrowUp className="h-5 w-5" /></button>
+        </form>
+      </motion.section>
 
       {error && <Notice tone="error">{error}</Notice>}
 
-      {/* 2. Hero Search Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="rounded-3xl border border-line section-gradient p-8 sm:p-10 shadow-md space-y-6 relative overflow-hidden"
-      >
-        <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent pointer-events-none"></div>
-        
-        <div className="flex items-center justify-between relative z-10">
-          <div className="space-y-1">
-            <h2 className="text-xl sm:text-2xl font-bold text-ink">
-              Ask Your Knowledge Base
-            </h2>
-            <p className="text-sm text-muted">
-              Instant answers grounded in your authorized documents
-            </p>
-          </div>
-          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-accent-light px-3 py-1.5 text-xs font-semibold text-accent">
-            <Sparkles className="h-3.5 w-3.5" />
-            AI Retrieval
-          </span>
-        </div>
-
-        <form onSubmit={handleSearchSubmit} className="relative z-10">
-          <div className="relative flex items-center group">
-            <Search className="absolute left-5 h-6 w-6 text-muted-light group-focus-within:text-accent transition-colors pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Ask a question... e.g. What is our leave policy?"
-              className="w-full rounded-2xl border-2 border-line bg-surface pl-14 pr-28 py-4 text-base text-ink placeholder:text-muted focus:border-accent focus:bg-surface focus:outline-none transition-all shadow-xs focus:shadow-sm"
-            />
-            <button
-              type="submit"
-              disabled={!searchQuery.trim()}
-              className="absolute right-2 rounded-xl bg-accent px-6 py-2.5 text-sm font-bold text-surface transition-all hover:bg-accent-hover hover:scale-105 disabled:opacity-40 disabled:hover:scale-100 cursor-pointer"
-            >
-              Ask
-            </button>
-          </div>
-        </form>
-
-        <div className="flex flex-wrap items-center gap-2.5 pt-2 relative z-10">
-          <span className="text-sm text-muted font-medium">Try asking:</span>
-          {starterPrompts.map((prompt, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => navigate(`/app/ask?q=${encodeURIComponent(prompt)}`)}
-              className="rounded-full border border-line bg-surface px-4 py-1.5 text-sm text-ink-light hover:border-accent hover:bg-accent-light hover:text-accent transition-all cursor-pointer"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-      </motion.div>
-
-      {/* 3. Core Overview Metrics (Vibrant & Card-Centric) */}
-      <motion.div 
-        variants={containerVariants}
-        initial="hidden"
-        animate="show"
-        className="grid gap-6 sm:grid-cols-3"
-      >
-        {/* Metric 1: Documents */}
-        <motion.div variants={itemVariants} className="card-hover rounded-2xl border border-line bg-surface p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-widest text-muted">
-              Authorized Docs
-            </span>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 text-blue-600 shadow-inner">
-              <FileText className="h-5 w-5" />
-            </div>
-          </div>
-          <div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-ink font-[tabular-nums]">
-              {stats?.accessible_documents ?? 0}
-              <span className="text-sm font-semibold text-muted ml-2">
-                / {stats?.total_documents ?? 0} total
-              </span>
-            </div>
-            <p className="text-sm text-muted mt-2">Available for AI search</p>
-          </div>
-        </motion.div>
-
-        {/* Metric 2: Queries */}
-        <motion.div variants={itemVariants} className="card-hover rounded-2xl border border-line bg-surface p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-widest text-muted">
-              Queries Answered
-            </span>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-100 to-violet-50 text-violet-600 shadow-inner">
-              <Sparkles className="h-5 w-5" />
-            </div>
-          </div>
-          <div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-ink font-[tabular-nums]">
-              {stats?.my_queries ?? 0}
-            </div>
-            <p className="text-sm text-muted mt-2">Grounded with page citations</p>
-          </div>
-        </motion.div>
-
-        {/* Metric 3: Security */}
-        <motion.div variants={itemVariants} className="card-hover rounded-2xl border border-line bg-surface p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-widest text-muted">
-              Security Shield
-            </span>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-50 text-emerald-600 shadow-inner">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center gap-3 text-3xl sm:text-4xl font-extrabold text-ink">
-              <span>Protected</span>
-              <span className="flex h-3 w-3 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
-            </div>
-            <p className="text-sm text-muted mt-2">Zero-trust role isolation</p>
-          </div>
-        </motion.div>
-      </motion.div>
-
-      {/* 4. Quick Actions Cards */}
-      <div className="space-y-4 pt-4">
-        <h3 className="text-sm font-bold uppercase tracking-widest text-muted">
-          Quick Actions
-        </h3>
-        <motion.div 
-          variants={containerVariants}
-          initial="hidden"
-          animate="show"
-          className="grid gap-4 sm:grid-cols-3"
-        >
-          {canUpload && (
-            <motion.div variants={itemVariants}>
-              <Link
-                to="/app/documents"
-                className="flex items-center gap-4 rounded-xl border border-line bg-surface p-5 hover:border-accent hover:shadow-md transition-all group relative overflow-hidden border-l-4 border-l-blue-500"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-50/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-blue-500 text-surface shrink-0 group-hover:scale-110 transition-transform shadow-sm relative z-10">
-                  <Upload className="h-6 w-6" />
-                </div>
-                <div className="min-w-0 relative z-10">
-                  <p className="text-base font-bold text-ink group-hover:text-blue-700 transition-colors truncate">
-                    Upload Documents
-                  </p>
-                  <p className="text-sm text-muted truncate">
-                    Add PDFs or Database Records
-                  </p>
-                </div>
+      {/* Quick actions */}
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+        {actions.map((a, i) => {
+          const Icon = a.icon;
+          return (
+            <motion.div key={a.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 * i }}>
+              <Link to={a.to} className="glass glass-hover group flex flex-col items-center gap-2 rounded-2xl p-4">
+                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-accent-light text-accent transition-colors group-hover:bg-accent group-hover:text-white">
+                  <Icon className="h-5 w-5" />
+                </span>
+                <span className="text-xs font-semibold text-ink">{a.label}</span>
               </Link>
             </motion.div>
-          )}
+          );
+        })}
+      </div>
 
-          {canManageRoles && (
-            <motion.div variants={itemVariants}>
-              <Link
-                to="/app/roles-hub"
-                className="flex items-center gap-4 rounded-xl border border-line bg-surface p-5 hover:border-accent hover:shadow-md transition-all group relative overflow-hidden border-l-4 border-l-indigo-500"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-indigo-50/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-indigo-500 text-surface shrink-0 group-hover:scale-110 transition-transform shadow-sm relative z-10">
-                  <Globe className="h-6 w-6" />
-                </div>
-                <div className="min-w-0 relative z-10">
-                  <p className="text-base font-bold text-ink group-hover:text-accent transition-colors truncate">
-                    Role Portals
-                  </p>
-                  <p className="text-sm text-muted truncate">
-                    Manage shareable login URLs
-                  </p>
-                </div>
-              </Link>
-            </motion.div>
-          )}
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard icon={MessageSquareText} label="My questions" value={stats?.my_queries ?? 0} tone="sky" />
+        <StatCard icon={Layers} label="Org questions" value={stats?.total_queries ?? 0} tone="violet" />
+        <StatCard icon={KeyRound} label="Pending requests" value={stats?.pending_requests_count ?? 0} tone="amber" />
+        <StatCard icon={Ban} label="Denials · 24h" value={stats?.denials_24h ?? 0} tone="rose" />
+      </div>
 
-          <motion.div variants={itemVariants}>
-            <Link
-              to="/app/access-requests"
-              className="flex items-center gap-4 rounded-xl border border-line bg-surface p-5 hover:border-accent hover:shadow-md transition-all group relative overflow-hidden border-l-4 border-l-amber-500"
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-amber-50/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-400 text-surface shrink-0 group-hover:scale-110 transition-transform shadow-sm relative z-10">
-                <KeyRound className="h-6 w-6" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Classification stamps */}
+        <section className="glass rounded-2xl p-5">
+          <p className="mb-4 flex items-center gap-2 text-sm font-bold text-ink"><Lock className="h-4 w-4 text-accent" /> Classification mix</p>
+          {counts && total > 0 ? (
+            <>
+              <div className="flex h-4 overflow-hidden rounded-full">
+                {Object.values(counts).map((n, i) => n > 0 && (
+                  <motion.div key={i} initial={{ width: 0 }} animate={{ width: `${(n / total) * 100}%` }} transition={{ duration: 0.8, delay: i * 0.1 }}
+                    className={LEVEL_BAR[i]} />
+                ))}
               </div>
-              <div className="min-w-0 relative z-10">
-                <p className="text-base font-bold text-ink group-hover:text-amber-600 transition-colors truncate">
-                  Access Requests
-                </p>
-                <p className="text-sm text-muted truncate">
-                  {stats?.pending_requests_count ? `${stats.pending_requests_count} pending review` : "Review clearances"}
-                </p>
+              <div className="mt-4 grid grid-cols-4 gap-2">
+                {Object.values(counts).map((n, i) => (
+                  <div key={i} className="rounded-xl border border-line bg-surface-subtle p-2.5 text-center">
+                    <span className={`mx-auto mb-1 block h-2 w-2 rounded-full ${LEVEL_BAR[i]}`} />
+                    <p className="display text-xl text-ink">{n}</p>
+                    <p className="text-[10px] text-muted">{LEVELS[i]}</p>
+                  </div>
+                ))}
               </div>
-            </Link>
-          </motion.div>
-        </motion.div>
+            </>
+          ) : <div className="skeleton h-24 rounded-xl" />}
+        </section>
+
+        {/* Engine */}
+        <section className="glass rounded-2xl p-5">
+          <p className="mb-4 flex items-center gap-2 text-sm font-bold text-ink"><Cpu className="h-4 w-4 text-ai" /> Engine</p>
+          {info ? (
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                [Sparkles, "Model", info.chat_model],
+                [Database, "Vectors", `${info.embed_dim}-d · ${info.embed_model}`],
+                [ScanLine, "OCR", info.ocr.join(" + ") || "off"],
+                [Lock, "Row rules", `${info.row_rules} guarded chunks`],
+                [FileStack, "Indexed", `${info.chunks} chunks`],
+                [Layers, "Records", `${info.records} rows`],
+              ].map(([Icon, k, v]) => {
+                const I = Icon as LucideIcon;
+                return (
+                  <div key={k as string} className="flex items-center gap-2.5 rounded-xl border border-line bg-surface-subtle p-2.5">
+                    <I className="h-4 w-4 shrink-0 text-accent" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted">{k as string}</p>
+                      <p className="truncate text-xs font-semibold text-ink">{v as string}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : <div className="skeleton h-24 rounded-xl" />}
+          <Link to="/app/ask" className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-accent hover:underline">
+            Try it <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </section>
       </div>
     </div>
   );

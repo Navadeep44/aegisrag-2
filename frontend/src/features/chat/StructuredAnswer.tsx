@@ -72,7 +72,7 @@ export function StructuredAnswer({
   );
 }
 
-function MarkdownContent({ text, isTyping }: { text: string; isTyping: boolean }) {
+export function MarkdownContent({ text, isTyping }: { text: string; isTyping: boolean }) {
   const lines = text.split("\n");
   const elements: React.ReactNode[] = [];
 

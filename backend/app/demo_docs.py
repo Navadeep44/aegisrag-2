@@ -122,6 +122,74 @@ def globex_prices(path: Path) -> None:
     pdf.save(path)
 
 
+def _photo(path: Path, width: int, height: int, lines: list[tuple[str, float]], bg=(0.93, 0.92, 0.88),
+           ink=(0.12, 0.12, 0.14), rotate: float = 0) -> None:
+    """A text-only picture saved as PNG: no text layer, so it must be read with OCR."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    page.draw_rect(page.rect, color=bg, fill=bg)
+    y = 56
+    for text, size in lines:
+        if text:
+            page.insert_text((44, y), text, fontsize=size, color=ink, rotate=0)
+        y += size * 1.9
+    pix = page.get_pixmap(dpi=144)
+    path.write_bytes(pix.tobytes("png"))
+
+
+def visitor_notice(path: Path) -> None:
+    _photo(path, 520, 420, [
+        ("ACME CORP - VISITOR POLICY", 20),
+        ("", 6),
+        ("All visitors must be escorted at all times.", 13),
+        ("Badge pickup: Reception B, Floor 2", 13),
+        ("Reception hours: 08:00 - 18:00, Mon - Fri", 13),
+        ("Visitor Wi-Fi network: Acme-Guest", 13),
+        ("Security desk extension: 4400", 13),
+        ("", 6),
+        ("Lost badge fee: $25", 13),
+    ])
+
+
+def roadmap_whiteboard(path: Path) -> None:
+    _photo(path, 560, 400, [
+        ("ENGINEERING ROADMAP - H2 2026", 19),
+        ("", 6),
+        ("July: migrate login to OIDC single sign-on", 13),
+        ("August: launch vector search v2 (HNSW index)", 13),
+        ("September: SOC 2 Type II audit window", 13),
+        ("October: deprecate legacy REST v1 API", 13),
+        ("", 6),
+        ("Owner: Platform team   Budget: $310,000", 12),
+    ], bg=(0.97, 0.97, 0.97), ink=(0.05, 0.2, 0.45))
+
+
+EXPENSES = [
+    ("EXP-1001", "Esha Rao", "Engineering", "Cloud credits", 1840.00, "Approved", "2025-01-14"),
+    ("EXP-1002", "Tariq Ali", "Engineering", "Conference travel", 2310.50, "Approved", "2025-02-03"),
+    ("EXP-1003", "Deepa Nair", "Engineering", "Hardware", 3125.00, "Pending", "2025-02-21"),
+    ("EXP-1004", "Esha Rao", "Engineering", "Software licenses", 960.00, "Approved", "2025-03-09"),
+    ("EXP-1005", "Hema Iyer", "HR", "Recruiting event", 1450.00, "Approved", "2025-01-22"),
+    ("EXP-1006", "Hema Iyer", "HR", "Training", 780.00, "Rejected", "2025-02-17"),
+    ("EXP-1007", "Lena Park", "HR", "Background checks", 615.00, "Approved", "2025-03-28"),
+    ("EXP-1008", "Farid Khan", "Finance", "Audit fees", 4200.00, "Approved", "2025-01-30"),
+    ("EXP-1009", "Farid Khan", "Finance", "Software licenses", 1320.00, "Pending", "2025-03-04"),
+    ("EXP-1010", "Orla Byrne", "Executive", "Client dinner", 890.75, "Approved", "2025-02-11"),
+    ("EXP-1011", "Orla Byrne", "Executive", "Board travel", 5600.00, "Approved", "2025-03-19"),
+    ("EXP-1012", "Emil Novak", "General", "Office supplies", 145.20, "Approved", "2025-01-08"),
+    ("EXP-1013", "Emil Novak", "General", "Team lunch", 230.00, "Pending", "2025-03-12"),
+    ("EXP-1014", "Asha Menon", "IT", "Laptops", 6480.00, "Approved", "2025-02-25"),
+    ("EXP-1015", "Asha Menon", "IT", "Network gear", 2275.00, "Approved", "2025-03-30"),
+    ("EXP-1016", "Ian Cole", "Security", "Penetration test", 7500.00, "Approved", "2025-03-15"),
+]
+
+
+def expense_claims(path: Path) -> None:
+    lines = ["Claim ID,Employee,Department,Category,Amount (USD),Status,Submitted"]
+    lines += [f"{a},{b},{c},{d},{e:.2f},{f},{g}" for a, b, c, d, e, f, g in EXPENSES]
+    path.write_text("\n".join(lines) + "\n")
+
+
 def generate(folder: Path) -> dict[str, Path]:
     folder.mkdir(parents=True, exist_ok=True)
     makers = {
@@ -129,6 +197,8 @@ def generate(folder: Path) -> dict[str, Path]:
         "revenue_report_fy2025.pdf": revenue_report, "architecture_overview.pdf": architecture,
         "scanned_invoice.pdf": scanned_invoice, "salary_bands_2026.xlsx": salary_bands,
         "globex_price_list.pdf": globex_prices,
+        "visitor_policy_notice.png": visitor_notice, "roadmap_whiteboard.png": roadmap_whiteboard,
+        "expense_claims_2025.csv": expense_claims,
     }
     for name, make in makers.items():
         make(folder / name)

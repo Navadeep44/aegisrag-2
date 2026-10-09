@@ -1,4 +1,6 @@
+import math
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -7,7 +9,7 @@ from sqlalchemy import cast, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app import ai
-from app.authorization import readable_clause
+from app.authorization import readable_chunk_clause
 from app.config import settings
 from app.db import IS_SQLITE
 from app.models import Chunk, Document, User
@@ -17,6 +19,9 @@ from app.models import Chunk, Document, User
 class Hit:
     chunk: Chunk
     document: Document
+    score: float = 0.0
+    vector_rank: int | None = None
+    keyword_rank: int | None = None
 
 
 def _rank_in_postgres(db: Session, base, query: str, vector: list[float]):
@@ -309,7 +314,7 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
         return [], []
 
     def cosine(other: list[float]) -> float:
-        if not other:
+        if not other or len(other) != len(vector):
             return 0.0
         dot = sum(a * b for a, b in zip(vector, other))
         norm = (sum(a * a for a in vector) ** 0.5) * (sum(b * b for b in other) ** 0.5)
@@ -330,16 +335,36 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
         for syn in ai.SYNONYMS.get(w, []):
             expanded_wanted.add(ai.stem(syn))
 
+    # BM25 over the permitted chunks only (k1=1.2, b=0.75), on query terms plus synonyms.
+    docs_tokens = {}
+    for r in rows:
+        cid, text, _, doc_title, doc_fn, sec_heading = r
+        docs_tokens[cid] = ai.tokens(text) + ai.tokens(sec_heading or "")
+    n_docs = len(docs_tokens)
+    avg_len = sum(len(t) for t in docs_tokens.values()) / max(1, n_docs)
+    df: dict[str, int] = {}
+    for toks in docs_tokens.values():
+        for t in set(toks):
+            df[t] = df.get(t, 0) + 1
+
+    def bm25(toks: list[str]) -> float:
+        tf: dict[str, int] = {}
+        for t in toks:
+            tf[t] = tf.get(t, 0) + 1
+        total = 0.0
+        for term in expanded_wanted:
+            f = tf.get(term)
+            if not f:
+                continue
+            idf = math.log(1 + (n_docs - df[term] + 0.5) / (df[term] + 0.5))
+            weight = 1.0 if term in wanted else 0.5
+            total += weight * idf * f * 2.2 / (f + 1.2 * (0.25 + 0.75 * len(toks) / avg_len))
+        return total
+
     overlap = {}
     for r in rows:
         cid, text, _, doc_title, doc_fn, sec_heading = r
-        chunk_tokens = (
-            set(ai.tokens(text))
-            | set(ai.tokens(doc_title or ""))
-            | set(ai.tokens(doc_fn or ""))
-            | set(ai.tokens(sec_heading or ""))
-        )
-        score = len(expanded_wanted & chunk_tokens)
+        score = bm25(docs_tokens[cid])
         
         # Boost if query explicitly targets the document title
         doc_title_tokens = set(ai.tokens(doc_title or ""))
@@ -379,7 +404,8 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
     return by_vector, by_keyword
 
 
-def search(db: Session, user: User, query: str, top_k: int | None = None) -> list[Hit]:
+def search(db: Session, user: User, query: str, top_k: int | None = None,
+           trace: dict | None = None) -> list[Hit]:
     """Hybrid search. The permission filter is part of every SQL statement here,
     so a chunk the user may not read is never ranked, returned or loaded."""
     q_analysis = parse_query_intent_and_entity(query)
@@ -394,22 +420,34 @@ def search(db: Session, user: User, query: str, top_k: int | None = None) -> lis
     )
     default_top_k = max(settings.retrieval_top_k, 25) if is_broad else settings.retrieval_top_k
     top_k = top_k or default_top_k
-    allowed = readable_clause(user)
+    allowed = readable_chunk_clause(user)
     base = select(Chunk.id).join(Document, Chunk.document_id == Document.id).where(allowed)
 
-    vector = ai.embed([query])[0]
+    t0 = time.perf_counter()
+    vector = ai.embed_query(query)
+    t1 = time.perf_counter()
     if IS_SQLITE:
         by_vector, by_keyword = _rank_in_python(db, allowed, query, vector)
     else:
         by_vector, by_keyword = _rank_in_postgres(db, base, query, vector)
 
+    # Reciprocal rank fusion of the dense and lexical rankings.
     scores: dict[int, float] = {}
     for ranking in (by_vector, by_keyword):
         for rank, chunk_id in enumerate(ranking):
             scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (60 + rank)
     best = sorted(scores, key=scores.get, reverse=True)[:top_k]
+    if trace is not None:
+        trace.update({
+            "embed_ms": round((t1 - t0) * 1000), "rank_ms": round((time.perf_counter() - t1) * 1000),
+            "vector_candidates": len(by_vector), "keyword_candidates": len(by_keyword),
+            "fused": len(best), "embedding_dim": len(vector),
+            "engine": "sqlite+python-bm25" if IS_SQLITE else "postgres+pgvector+tsvector",
+        })
     if not best:
         return []
+    v_rank = {cid: i + 1 for i, cid in enumerate(by_vector)}
+    k_rank = {cid: i + 1 for i, cid in enumerate(by_keyword)}
 
     # Adaptive Structural & Sibling Expansion (Complete-List Mode & Parent-Child Retrieval)
     if (q_analysis.requires_complete_dataset or q_analysis.is_asking_for_items) and best:
@@ -449,16 +487,7 @@ def search(db: Session, user: User, query: str, top_k: int | None = None) -> lis
         .join(Document, Chunk.document_id == Document.id)
         .where(Chunk.id.in_(best), allowed)
     ).all()
-    by_id = {chunk.id: Hit(chunk, document) for chunk, document in rows}
-    
-    user_roles_set = set(user.role_names) | {r.slug for r in user.roles if r.slug} | {r.id for r in user.roles}
-    results = []
-    for i in best:
-        if i in by_id:
-            hit = by_id[i]
-            # Enforce section-level role ACL if restricted
-            if hit.chunk.allowed_roles and not user.is_admin and not user.is_platform_admin:
-                if not any(r in user_roles_set for r in hit.chunk.allowed_roles):
-                    continue
-            results.append(hit)
-    return results
+    by_id = {chunk.id: Hit(chunk, document, scores.get(chunk.id, 0.0), v_rank.get(chunk.id), k_rank.get(chunk.id))
+             for chunk, document in rows}
+    # Row/section rules were applied inside the SQL above (readable_chunk_clause).
+    return [by_id[i] for i in best if i in by_id]

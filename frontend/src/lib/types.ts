@@ -92,6 +92,7 @@ export type Doc = {
     sample_preview?: Record<string, unknown>[];
   } | null;
   access?: Grant[];
+  row_policy?: { column: string; subject_type: string; full_access_roles: string[] } | null;
 };
 
 export type DocStatus = {
@@ -116,6 +117,49 @@ export type Citation = {
   classification: number;
   section_heading?: string;
   snippet: string;
+  quote?: string;
+};
+
+export type ClaimStatus = "verified" | "partial" | "unsupported" | "computed";
+
+export type Claim = {
+  text: string;
+  citations: number[];
+  status: ClaimStatus;
+  support: number;
+  quote: string;
+  quote_chunk: number | null;
+  missing_numbers: string[];
+};
+
+export type TraceStep = {
+  key: string;
+  label: string;
+  ms: number;
+  [detail: string]: unknown;
+};
+
+export type AnswerMeta = {
+  mode: "rag" | "analytics" | "guard";
+  headline?: string;
+  claims: Claim[];
+  table?: { columns: string[]; rows: string[][]; citations?: number[] } | null;
+  gaps?: string;
+  grounding?: { score: number; claims: number; verified: number; partial: number };
+  trace?: { steps: TraceStep[]; total_ms: number };
+};
+
+export type PipelineInfo = {
+  provider: string;
+  chat_model: string;
+  embed_model: string;
+  embed_dim: number;
+  vector_store: string;
+  ocr: string[];
+  documents: number;
+  chunks: number;
+  records: number;
+  row_rules: number;
 };
 
 export type Message = {
@@ -129,6 +173,7 @@ export type Message = {
     title: string;
     classification: number;
   } | null;
+  meta?: AnswerMeta | null;
   isNew?: boolean;
 };
 
@@ -138,6 +183,7 @@ export type ChatReply = {
   status: string;
   answer: string;
   citations: Citation[];
+  meta?: AnswerMeta | null;
   suggested_resource?: {
     id: string;
     title: string;
@@ -211,6 +257,7 @@ export type SimResult = {
   matches: { document_id: string; title: string; page: number }[];
   searchable: SimRow[];
   excluded: SimRow[];
+  row_access?: { document_id: string; title: string; visible_rows: number; total_rows: number; rule: string }[];
 };
 
 export type TestResult = {

@@ -6,19 +6,22 @@ interface StatusPillProps {
 export function StatusPill({ status, size = "sm" }: StatusPillProps) {
   const norm = status.toLowerCase();
 
-  let colorClasses = "bg-slate-100 text-slate-700 border-slate-200";
-  let dotColor = "bg-slate-500";
+  let colorClasses = "bg-surface-subtle text-ink-light border-line";
+  let dotColor = "bg-muted";
   let label = status;
 
   if (norm === "active" || norm === "ready" || norm === "approved" || norm === "allowed" || norm === "pass" || norm === "passed") {
     colorClasses = "bg-allow-bg text-allow border-allow-border";
     dotColor = "bg-allow";
     label = norm === "pass" || norm === "passed" ? "Passed" : status;
+  } else if (norm === "answered" || norm === "verified" || norm === "computed") {
+    colorClasses = "bg-allow-bg text-allow border-allow-border";
+    dotColor = "bg-allow";
   } else if (norm === "pending" || norm === "processing" || norm === "queued" || norm === "abstained") {
     colorClasses = "bg-warn-bg text-warn border-warn-border";
     dotColor = "bg-warn";
     label = norm === "abstained" ? "No source" : status;
-  } else if (norm === "flagged" || norm === "denied" || norm === "failed" || norm === "rejected" || norm === "deactivated" || norm === "suspended") {
+  } else if (norm === "flagged" || norm === "denied" || norm === "failed" || norm === "rejected" || norm === "deactivated" || norm === "suspended" || norm === "refused" || norm === "redacted") {
     colorClasses = "bg-deny-bg text-deny border-deny-border";
     dotColor = "bg-deny";
     label = norm === "failed" ? "Failed" : status;
@@ -28,7 +31,7 @@ export function StatusPill({ status, size = "sm" }: StatusPillProps) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border font-medium uppercase tracking-wider font-mono ${sizeClasses} ${colorClasses}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border font-semibold tracking-wide ${sizeClasses} ${colorClasses}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${dotColor}`} />
       <span className="capitalize">{label}</span>
@@ -38,8 +41,8 @@ export function StatusPill({ status, size = "sm" }: StatusPillProps) {
 
 export function RolePill({ role }: { role: string }) {
   return (
-    <span className="inline-flex items-center rounded-md border border-line bg-surface-subtle px-2 py-0.5 text-[0.7rem] font-medium text-ink font-mono">
-      {role}
+    <span className="inline-flex items-center rounded-full border border-ai/25 bg-ai/10 px-2 py-0.5 text-[0.68rem] font-semibold text-ai">
+      {role.replace(/_/g, " ")}
     </span>
   );
 }
@@ -55,15 +58,15 @@ export function ClearancePill({
   const name = label || names[clearance] || `Level ${clearance}`;
 
   const styles = [
-    "bg-slate-100 text-slate-800 border-slate-200",
-    "bg-blue-50 text-blue-800 border-blue-200",
-    "bg-amber-50 text-amber-800 border-amber-200",
-    "bg-rose-50 text-rose-800 border-rose-200",
+    "bg-level-0/10 text-level-0 border-level-0/30",
+    "bg-level-1/10 text-level-1 border-level-1/30",
+    "bg-level-2/10 text-level-2 border-level-2/30",
+    "bg-level-3/10 text-level-3 border-level-3/30",
   ];
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[0.7rem] font-medium font-mono ${
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.68rem] font-semibold ${
         styles[clearance] || styles[0]
       }`}
     >

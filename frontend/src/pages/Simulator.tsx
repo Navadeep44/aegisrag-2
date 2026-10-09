@@ -1,284 +1,162 @@
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import {
-  SlidersHorizontal,
-  CheckCircle2,
-  Lock,
-  Search,
-  Sparkles,
-  HelpCircle,
-  FileText,
-  User as UserIcon,
-} from "lucide-react";
+import { CheckCircle2, Loader2, Lock, Play, Rows3, Search, SlidersHorizontal, XCircle } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
-import { Button } from "../components/ui/Button";
 import { Notice } from "../components/ui/Notice";
-import { EmptyState } from "../components/ui/EmptyState";
-import { ClearancePill, RolePill } from "../components/ui/StatusPill";
+import { ClearancePill } from "../components/ui/StatusPill";
 import { api, post } from "../lib/api";
-import type { SimResult, SimRow, User } from "../lib/types";
+import { LEVELS, type SimResult, type User } from "../lib/types";
+
+const RING = ["from-level-0 to-slate-300", "from-level-1 to-sky-300", "from-level-2 to-amber-300", "from-level-3 to-rose-300"];
+const LEVEL_BAR = ["bg-level-0", "bg-level-1", "bg-level-2", "bg-level-3"];
+const LEVEL_TEXT = ["text-level-0", "text-level-1", "text-level-2", "text-level-3"];
+const PRESETS = ["What was our annual revenue?", "Total approved expense claims", "Salary range for a Senior Engineer", "Engineering roadmap for August"];
 
 export default function Simulator() {
   const [users, setUsers] = useState<User[]>([]);
   const [userId, setUserId] = useState("");
-  const [question, setQuestion] = useState("What was our annual revenue in FY2025?");
+  const [question, setQuestion] = useState(PRESETS[0]);
   const [result, setResult] = useState<SimResult | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api<User[]>("/users")
-      .then((list) => {
-        setUsers(list);
-        const defaultUser = list.find((u) => !u.is_admin) ?? list[0];
-        if (defaultUser) setUserId(defaultUser.id);
-      })
-      .catch((e) => setError(e.message));
+    api<User[]>("/users").then((list) => {
+      setUsers(list);
+      const d = list.find((u) => u.email === "employee@acme.test") ?? list.find((u) => !u.is_admin) ?? list[0];
+      if (d) setUserId(d.id);
+    }).catch((e) => setError(e.message));
   }, []);
 
-  async function runSimulation(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    if (!userId || !question.trim() || busy) return;
-
+  async function run(id = userId, q = question) {
+    if (!id || !q.trim()) return;
     setBusy(true);
     setError("");
     try {
-      const res = await post<SimResult>("/policies/simulate", {
-        user_id: userId,
-        question: question.trim(),
-      });
-      setResult(res);
-    } catch (err) {
-      setError((err as Error).message);
+      setResult(await post<SimResult>("/policies/simulate", { user_id: id, question: q.trim() }));
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
 
-  const selectedUserObj = users.find((u) => u.id === userId);
-
   return (
-    <div className="space-y-8 pb-16">
-      <PageHeader
-        title="Check what someone can see"
-        subtitle="Simulate which documents a colleague's question can draw upon before retrieval, and inspect the exact authorization reason."
-      />
-
+    <div className="space-y-6 pb-12">
+      <PageHeader icon={SlidersHorizontal} title="Permission simulator" subtitle="See exactly what a person's question can reach — and why." />
       {error && <Notice tone="error">{error}</Notice>}
 
-      <div className="grid gap-8 lg:grid-cols-[1fr_1.3fr] items-start">
-        {/* Left Column: Input Form & Person Picker */}
-        <section className="rounded-xl border border-line bg-surface p-6 shadow-xs space-y-5">
-          <div>
-            <h2 className="display text-2xl font-semibold text-ink">1. Choose person & question</h2>
-            <p className="text-xs text-muted mt-0.5">
-              Select any colleague profile to test against SQL authorization clauses.
-            </p>
-          </div>
-
-          <form onSubmit={runSimulation} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-ink mb-1.5">Select Colleague</label>
-              <select
-                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
-                value={userId}
-                onChange={(e) => setUserId(e.target.value)}
-              >
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.roles.join(", ")} • Clearance L{u.clearance})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedUserObj && (
-              <div className="rounded-lg border border-line bg-surface-subtle p-3 text-xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted">Clearance Level:</span>
-                  <ClearancePill
-                    clearance={selectedUserObj.clearance}
-                    label={selectedUserObj.clearance_label}
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted">Roles:</span>
-                  <span className="text-ink font-mono font-medium">
-                    {selectedUserObj.roles.join(", ")}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted">Department:</span>
-                  <span className="text-ink">{selectedUserObj.department_name || "General"}</span>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-medium text-ink mb-1.5">Test Question</label>
-              <textarea
-                rows={3}
-                className="w-full rounded-lg border border-line bg-surface p-3 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Type a question to test authorization boundaries..."
-              />
-            </div>
-
-            <div className="pt-2">
-              <Button type="submit" disabled={busy || !userId || !question.trim()} className="w-full">
-                {busy ? "Running policy simulation…" : "Check access"}
-              </Button>
-            </div>
-          </form>
-
-          <div className="border-t border-line pt-4">
-            <p className="text-[0.7rem] font-bold uppercase tracking-wider text-muted font-mono mb-2">
-              Try sample scenarios:
-            </p>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setQuestion("What was our annual revenue in FY2025?");
-                  const emp = users.find((u) => u.email === "employee@acme.test") || users[0];
-                  if (emp) setUserId(emp.id);
-                }}
-                className="w-full text-left rounded-lg border border-line bg-surface-subtle p-2.5 text-xs text-ink hover:border-ink/60 transition-colors"
-              >
-                <span className="font-semibold block">Employee asks about FY2025 Revenue</span>
-                <span className="text-[0.7rem] text-muted">Tests Level 2 Confidential boundary check</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setQuestion("What is the salary band for Level 4 Engineers?");
-                  const eng = users.find((u) => u.email === "engineer@acme.test") || users[0];
-                  if (eng) setUserId(eng.id);
-                }}
-                className="w-full text-left rounded-lg border border-line bg-surface-subtle p-2.5 text-xs text-ink hover:border-ink/60 transition-colors"
-              >
-                <span className="font-semibold block">Engineer asks about Salary Bands 2026</span>
-                <span className="text-[0.7rem] text-muted">Tests Level 3 Restricted HR vault isolation</span>
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* Right Column: Simulation Results */}
-        <section className="space-y-6">
-          {!result && !busy && (
-            <EmptyState
-              icon={SlidersHorizontal}
-              title="No simulation run yet"
-              description="Choose a person and question on the left to see which documents they can search and why other documents are blocked."
-              actionText="Try an example"
-              onAction={() => runSimulation()}
-            />
-          )}
-
-          {busy && (
-            <div className="rounded-xl border border-line bg-surface p-12 text-center text-xs text-muted space-y-3">
-              <span className="inline-block h-3 w-3 rounded-full bg-accent animate-ping" />
-              <p>Simulating SQL-level pre-retrieval authorization clauses…</p>
-            </div>
-          )}
-
-          {result && !busy && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
-              className="space-y-6"
-            >
-              {/* Summary Card */}
-              <div className="rounded-xl border border-line bg-surface p-5 shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="display text-xl font-semibold text-ink">
-                    Simulation result for {result.user.name}
-                  </h3>
-                  <ClearancePill
-                    clearance={result.user.clearance}
-                    label={result.user.clearance_label}
-                  />
-                </div>
-                <p className="text-xs text-muted leading-relaxed">
-                  When asking <em>"{question}"</em>, SQL pre-inference filters allow searching{" "}
-                  <strong className="text-allow">{result.searchable.length} documents</strong> and exclude{" "}
-                  <strong className="text-deny">{result.excluded.length} documents</strong>.
-                </p>
-              </div>
-
-              {/* Allowed Documents List */}
-              <div className="rounded-xl border border-allow-border bg-allow-bg/30 p-5 shadow-xs space-y-3">
-                <div className="flex items-center gap-2 text-allow font-semibold text-sm">
-                  <CheckCircle2 className="h-5 w-5" />
-                  <span>Can be searched ({result.searchable.length})</span>
-                </div>
-
-                {result.searchable.length === 0 ? (
-                  <p className="text-xs text-muted">
-                    No documents authorized. The colleague will be told there is no authorized source.
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-allow-border/60">
-                    {result.searchable.map((r, i) => (
-                      <motion.li
-                        key={r.document_id}
-                        initial={{ opacity: 0, x: -6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.05 * i }}
-                        className="py-2.5 text-xs first:pt-0 last:pb-0"
-                      >
-                        <div className="flex items-baseline justify-between">
-                          <p className="font-semibold text-ink text-sm">{r.title}</p>
-                          <span className="font-mono text-[0.7rem] text-muted">
-                            {r.classification_label}
-                          </span>
-                        </div>
-                        <p className="text-muted mt-0.5">{r.reason}</p>
-                      </motion.li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {/* Excluded Documents List */}
-              <div className="rounded-xl border border-deny-border bg-deny-bg/30 p-5 shadow-xs space-y-3">
-                <div className="flex items-center gap-2 text-deny font-semibold text-sm">
-                  <Lock className="h-5 w-5" />
-                  <span>Excluded before search ({result.excluded.length})</span>
-                </div>
-
-                {result.excluded.length === 0 ? (
-                  <p className="text-xs text-muted">Nothing was excluded.</p>
-                ) : (
-                  <ul className="divide-y divide-deny-border/60">
-                    {result.excluded.map((r, i) => (
-                      <motion.li
-                        key={r.document_id}
-                        initial={{ opacity: 0, x: -6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.05 * i }}
-                        className="py-2.5 text-xs first:pt-0 last:pb-0"
-                      >
-                        <div className="flex items-baseline justify-between">
-                          <p className="font-semibold text-ink text-sm">{r.title}</p>
-                          <span className="font-mono text-[0.7rem] text-muted">
-                            {r.classification_label}
-                          </span>
-                        </div>
-                        <p className="text-deny/90 font-medium mt-0.5">{r.reason}</p>
-                      </motion.li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </section>
+      {/* People */}
+      <div className="flex gap-2 overflow-x-auto pb-2">
+        {users.map((u) => {
+          const active = u.id === userId;
+          return (
+            <button key={u.id} onClick={() => { setUserId(u.id); run(u.id); }}
+              className={`flex shrink-0 items-center gap-2 rounded-2xl border px-2.5 py-2 transition-all ${
+                active ? "border-accent bg-accent-light shadow-sm" : "border-line bg-surface hover:border-accent/40"}`}>
+              <span className={`grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br p-[2px] ${RING[u.clearance] ?? RING[1]}`}>
+                <span className="display grid h-full w-full place-items-center rounded-full bg-surface text-sm text-ink">{u.name[0]}</span>
+              </span>
+              <span className="text-left">
+                <span className="block text-xs font-bold text-ink">{u.name.replace(/\s*\(.*\)/, "")}</span>
+                <span className={`block text-[10px] font-semibold ${LEVEL_TEXT[u.clearance]}`}>{(u.roles.find((r) => r !== "employee") ?? u.roles[0])?.replace(/_/g, " ")}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
+
+      {/* Question */}
+      <form onSubmit={(e) => { e.preventDefault(); run(); }} className="glass flex flex-col gap-3 rounded-2xl p-3 sm:flex-row sm:items-center">
+        <Search className="ml-2 hidden h-5 w-5 text-muted sm:block" />
+        <input value={question} onChange={(e) => setQuestion(e.target.value)}
+          className="flex-1 bg-transparent px-2 py-2 text-sm text-ink focus:outline-none" />
+        <div className="flex flex-wrap gap-1.5">
+          {PRESETS.map((p) => (
+            <button type="button" key={p} onClick={() => { setQuestion(p); run(userId, p); }}
+              className="chip hover:border-accent/40 hover:text-accent">{p.split(" ").slice(0, 3).join(" ")}…</button>
+          ))}
+        </div>
+        <button className="btn-primary inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm" disabled={busy}>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run
+        </button>
+      </form>
+
+      <AnimatePresence mode="wait">
+        {result && (
+          <motion.div key={result.user.id + question} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="space-y-4">
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-surface-subtle px-4 py-3">
+              <span className="display text-lg text-ink">{result.user.name}</span>
+              <ClearancePill clearance={result.user.clearance} label={result.user.clearance_label} />
+              <span className="chip"><CheckCircle2 className="h-3 w-3 text-allow" /> {result.searchable.length} reachable</span>
+              <span className="chip"><XCircle className="h-3 w-3 text-deny" /> {result.excluded.length} blocked in SQL</span>
+              <span className="chip"><Search className="h-3 w-3 text-accent" /> {result.matches.length} would match</span>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Column title="Reachable" tone="allow" rows={result.searchable.map((r) => ({
+                ...r, hit: result.matches.some((m) => m.document_id === r.document_id),
+              }))} />
+              <Column title="Blocked before retrieval" tone="deny" rows={result.excluded.map((r) => ({ ...r, hit: false }))} />
+            </div>
+
+            {result.row_access && result.row_access.length > 0 && (
+              <section className="glass rounded-2xl p-5">
+                <p className="mb-3 flex items-center gap-2 text-sm font-bold text-ink"><Rows3 className="h-4 w-4 text-emerald-700" /> Row-level view</p>
+                <div className="space-y-3">
+                  {result.row_access.map((r) => {
+                    const pct = r.total_rows ? (r.visible_rows / r.total_rows) * 100 : 0;
+                    return (
+                      <div key={r.document_id}>
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className="font-semibold text-ink">{r.title}</span>
+                          <span className="font-mono text-muted">{r.visible_rows} / {r.total_rows} rows</span>
+                        </div>
+                        <div className="h-3 overflow-hidden rounded-full bg-deny-bg">
+                          <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.8 }} className="h-full rounded-full bg-allow" />
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted">{r.rule}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function Column({ title, tone, rows }: {
+  title: string; tone: "allow" | "deny";
+  rows: { document_id: string; title: string; classification_label: string; reason: string; hit: boolean }[];
+}) {
+  const Icon = tone === "allow" ? CheckCircle2 : Lock;
+  const lvl = (label: string) => Math.max(0, LEVELS.findIndex((l) => l.toLowerCase() === label.toLowerCase()));
+  return (
+    <section className="glass rounded-2xl p-4">
+      <p className={`mb-3 flex items-center gap-2 text-sm font-bold ${tone === "allow" ? "text-allow" : "text-deny"}`}>
+        <Icon className="h-4 w-4" /> {title} <span className="text-muted">· {rows.length}</span>
+      </p>
+      <div className="space-y-2">
+        {rows.map((r, i) => (
+          <motion.div key={r.document_id} initial={{ opacity: 0, x: tone === "allow" ? -8 : 8 }} animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.03 }}
+            className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${tone === "allow" ? "border-allow-border bg-allow-bg/50" : "border-deny-border bg-deny-bg/50"}`}>
+            <span className={`h-8 w-1 rounded-full ${LEVEL_BAR[lvl(r.classification_label)]}`} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-ink">{r.title}</p>
+              <p className="truncate text-[11px] text-muted">{r.reason}</p>
+            </div>
+            {r.hit && <span className="chip border-accent/30 text-accent"><Search className="h-3 w-3" /> match</span>}
+            <span className={`text-[10px] font-bold ${LEVEL_TEXT[lvl(r.classification_label)]}`}>{r.classification_label}</span>
+          </motion.div>
+        ))}
+        {rows.length === 0 && <p className="py-6 text-center text-xs text-muted">None</p>}
+      </div>
+    </section>
   );
 }

@@ -1,102 +1,73 @@
-import gsap from "gsap";
-import { lazy, Suspense, useLayoutEffect, useRef } from "react";
-import { ButtonLink } from "../../components/ui/Button";
-import { ShieldCheck, ArrowRight, CheckCircle2, Lock, Sparkles } from "lucide-react";
+import { motion } from "framer-motion";
+import { lazy, Suspense } from "react";
+import { Link } from "react-router-dom";
+import { ArrowRight, CheckCircle2, Lock, XCircle } from "lucide-react";
+import { LogoMark } from "../../components/brand/Logo";
 
 const SheetStack = lazy(() => import("../../components/three/SheetStack"));
-const HEADLINE = ["Every answer", "checks who", "is asking."];
+
+function DocumentScene() {
+  return (
+    <div className="relative h-[22rem] w-full sm:h-[28rem] lg:h-[34rem]">
+      <div className="grid-bg absolute -inset-6 opacity-70" />
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 1.2, delay: 0.2 }}
+        className="absolute inset-0 overflow-hidden rounded-[2rem] border border-line bg-gradient-to-br from-accent-light/70 via-surface to-ai-light/60 shadow-md">
+        <Suspense fallback={null}>
+          <SheetStack />
+        </Suspense>
+      </motion.div>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }}
+        className="glass absolute left-4 top-5 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-ink">
+        <CheckCircle2 className="h-4 w-4 text-allow" /> Readable sheets lift into the answer
+      </motion.div>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.1 }}
+        className="glass absolute bottom-5 right-4 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-ink">
+        <XCircle className="h-4 w-4 text-deny" /> Restricted sheets stay redacted
+      </motion.div>
+      <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 1.3, type: "spring" }}
+        className="absolute bottom-5 left-4 grid h-14 w-14 place-items-center rounded-2xl border border-accent/30 bg-surface shadow-md">
+        <LogoMark className="h-9 w-9" />
+      </motion.div>
+    </div>
+  );
+}
 
 export function Hero() {
-  const root = useRef<HTMLElement>(null);
-
-  useLayoutEffect(() => {
-    const media = gsap.matchMedia();
-    media.add("(prefers-reduced-motion: no-preference)", () => {
-      const ctx = gsap.context(() => {
-        gsap.timeline({ defaults: { ease: "power4.out" } })
-          .from("[data-badge]", { opacity: 0, y: 14, duration: 0.7 })
-          .from("[data-line]", { yPercent: 120, duration: 1.1, stagger: 0.1 }, "-=0.4")
-          .from("[data-fade]", { opacity: 0, y: 16, duration: 0.8, stagger: 0.08 }, "-=0.6")
-          .from("[data-guarantees]", { opacity: 0, y: 12, duration: 0.8 }, "-=0.4")
-          .from("[data-scene]", { opacity: 0, scale: 0.96, duration: 1.4, ease: "power2.out" }, 0.2);
-      }, root);
-      return () => ctx.revert();
-    });
-    return () => media.revert();
-  }, []);
-
   return (
-    <section
-      ref={root}
-      className="relative mx-auto grid max-w-6xl items-center gap-8 px-6 pb-20 pt-12 lg:min-h-[calc(100vh-4.5rem)] lg:grid-cols-[1.1fr_1fr] lg:pb-16 lg:pt-8"
-    >
-      {/* Subtle Background Radial Glow */}
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,rgba(79,70,229,0.08),rgba(255,255,255,0))] pointer-events-none" />
-
-      {/* Left Content Column */}
-      <div className="z-10 flex flex-col justify-center">
-        {/* Eyebrow / Security Badge */}
-        <div data-badge className="mb-5 inline-flex items-center gap-2 self-start rounded-full border border-accent/20 bg-accent-light px-3.5 py-1.5 text-xs font-semibold text-accent shadow-xs">
-          <span className="flex h-2 w-2 rounded-full bg-accent animate-pulse" />
-          <ShieldCheck className="h-4 w-4" />
-          <span>Zero-Trust Enterprise RAG</span>
-        </div>
-
-        {/* Primary Headline */}
-        <h1 className="display text-[clamp(3.2rem,7.5vw,5.8rem)] font-normal tracking-tight text-ink leading-[1.02]">
-          {HEADLINE.map((line) => (
-            <span key={line} className="block overflow-hidden pb-[0.06em]">
-              <span data-line className="block">{line}</span>
-            </span>
-          ))}
-        </h1>
-
-        {/* Subtitle / Value Proposition */}
-        <p data-fade className="mt-6 max-w-lg text-lg sm:text-xl leading-relaxed text-muted">
-          AegisRAG enables companies to query sensitive documents, financial scans, and records.
-          <span className="font-semibold text-ink"> Access checks run at the database layer</span> before the AI engine ever sees a document.
-        </p>
-
-        {/* CTA Buttons */}
-        <div data-fade className="mt-8 flex flex-wrap items-center gap-3.5">
-          <ButtonLink to="/signin" size="lg" className="px-7 py-3.5 text-base font-semibold shadow-sm hover:shadow-md transition-all flex items-center gap-2 group">
-            <span>Open Interactive Demo</span>
-            <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
-          </ButtonLink>
-          <a
-            href="#same-question"
-            className="inline-flex items-center rounded-full border border-line bg-surface px-6 py-3.5 text-base font-medium text-ink shadow-xs transition-all hover:border-ink hover:bg-surface-subtle"
-          >
-            See Live Comparison
-          </a>
-        </div>
-
-        {/* Key Architectural Guarantees Strip */}
-        <div data-guarantees className="mt-10 flex flex-wrap items-center gap-y-2 gap-x-6 border-t border-line/80 pt-6 text-xs text-muted">
-          <div className="flex items-center gap-1.5">
-            <CheckCircle2 className="h-3.5 w-3.5 text-allow" />
-            <span className="font-medium text-ink">Pre-Retrieval SQL Gate</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <CheckCircle2 className="h-3.5 w-3.5 text-allow" />
-            <span className="font-medium text-ink">Zero Data Leakage</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <CheckCircle2 className="h-3.5 w-3.5 text-allow" />
-            <span className="font-medium text-ink">100% Page Grounding</span>
+    <section className="relative overflow-hidden">
+      <div className="mx-auto grid max-w-7xl items-center gap-14 px-5 pb-20 pt-16 lg:grid-cols-[1fr_1.05fr] lg:pt-24">
+        <div>
+          <motion.span initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            className="chip mb-6 border-accent/30 bg-accent-light text-accent">
+            <Lock className="h-3 w-3" /> PS-01 · Secure multi-modal RAG
+          </motion.span>
+          <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+            className="display text-5xl leading-[1.02] text-ink sm:text-6xl lg:text-7xl">
+            Answers only from <span className="text-gradient">what you're cleared</span> to see.
+          </motion.h1>
+          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}
+            className="mt-6 max-w-md text-lg text-muted">
+            PDFs, scans, photos and database rows — permission-checked in SQL, every claim cited.
+          </motion.p>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }} className="mt-8 flex flex-wrap gap-3">
+            <Link to="/signin" className="btn-primary inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 text-sm">
+              Try a persona <ArrowRight className="h-4 w-4" />
+            </Link>
+            <a href="#same-question" className="inline-flex items-center gap-2 rounded-2xl border border-line bg-surface px-6 py-3.5 text-sm font-semibold text-ink hover:border-accent/40">
+              See it decide
+            </a>
+          </motion.div>
+          <div className="mt-10 grid max-w-md grid-cols-3 gap-3">
+            {[["0", "restricted chunks sent to the model"], ["100%", "claims carry a source"], ["4", "data types, one index"]].map(([v, l]) => (
+              <div key={l} className="border-l-2 border-accent/40 pl-3">
+                <p className="display text-2xl text-ink">{v}</p>
+                <p className="text-[11px] leading-tight text-muted">{l}</p>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
-
-      {/* Right 3D Scene Column */}
-      <div data-scene className="relative h-[22rem] w-full sm:h-[28rem] lg:h-[36rem] flex items-center justify-center">
-        <div className="absolute inset-0 rounded-3xl bg-gradient-to-tr from-accent/5 via-surface to-accent/5 border border-line/50 shadow-xs overflow-hidden">
-          <Suspense fallback={null}>
-            <SheetStack />
-          </Suspense>
-        </div>
+        <DocumentScene />
       </div>
     </section>
   );
 }
-

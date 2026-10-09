@@ -13,6 +13,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
+import { Users as UsersIcon } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { StatCard } from "../components/ui/StatCard";
 import { TableSkeleton } from "../components/ui/Skeleton";
@@ -270,8 +271,9 @@ export default function UsersAndRoles() {
     <div className="space-y-8 pb-16">
       {/* 1. Page Header with single primary action & clean action buttons */}
       <PageHeader
+        icon={UsersIcon}
         title="People & Roles"
-        subtitle="Manage user credentials, security clearance levels, and custom permission bundles."
+        subtitle="People, clearance and role bundles."
         action={
           <div className="flex flex-wrap items-center gap-2">
             {canInvite && (

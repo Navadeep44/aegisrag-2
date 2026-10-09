@@ -276,6 +276,9 @@ class Document(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     sections_metadata: Mapped[list] = mapped_column(JSON, default=list)
     data_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Row-level rule for structured records, e.g.
+    # {"column": "Department", "subject_type": "department", "full_access_roles": [role ids]}
+    row_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     access: Mapped[list["DocumentAccess"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin"
     )
@@ -315,6 +318,32 @@ class Chunk(Base):
     embedding = mapped_column(Vector() if IS_POSTGRES else JSON())
 
 
+class ChunkAccess(Base):
+    """Row/section-level grant on a single chunk. A chunk with no rows here
+    inherits its document's access; a chunk with rows is visible only to the
+    subjects listed (on top of being able to read the document)."""
+
+    __tablename__ = "chunk_access"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
+    subject_type: Mapped[str] = mapped_column(String)  # role | department | user
+    subject_id: Mapped[str] = mapped_column(String, index=True)
+
+
+class Record(Base):
+    """One structured row (CSV/JSON/XLSX/DB export), linked to its own chunk so
+    the row inherits exactly the same access check as any other evidence."""
+
+    __tablename__ = "records"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
+    chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), index=True)
+    sheet: Mapped[str] = mapped_column(String, default="")
+    row_index: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
@@ -337,6 +366,7 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, default="")  # answered | abstained
     citations: Mapped[list] = mapped_column(JSON, default=list)
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # claims, table, trace
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
