@@ -91,6 +91,7 @@ export type Doc = {
     primary_key?: string;
     sample_preview?: Record<string, unknown>[];
   } | null;
+  chunk_count?: number;
   access?: Grant[];
 };
 
@@ -232,12 +233,30 @@ export type AuditEvent = {
   id: number;
   time: string;
   user: string;
+  user_email?: string;
+  roles?: string[];
+  question?: string | null;
   actor?: string;
   action: string;
   decision: string;
   correlation_id?: string;
   documents: string[];
+  suggested_resource?: string | null;
   detail?: Record<string, unknown>;
+};
+
+export type UnauthorizedQuery = {
+  id: number;
+  time: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  user_roles: string[];
+  question: string;
+  decision: string;
+  correlation_id: string;
+  suggested_resource: string | null;
+  accessible_documents_count: number;
 };
 
 export type AccessRequest = {

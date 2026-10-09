@@ -42,11 +42,23 @@ import { api, imageUrl, post } from "../lib/api";
 import type { Department, Doc, DocStatus, FlaggedDoc, Grant, Role, SectionMeta, User } from "../lib/types";
 import { hasPermission } from "../lib/types";
 
+type ScoreboardData = {
+  total_documents: number;
+  active_documents: number;
+  processing_documents: number;
+  flagged_documents: number;
+  total_pages: number;
+  total_chunks: number;
+  health_score: number;
+  ready_to_search_percentage: number;
+};
+
 export default function Documents() {
   const { user } = useAuth();
   const { showToast } = useToast();
 
   const [docs, setDocs] = useState<Doc[] | null>(null);
+  const [scoreboard, setScoreboard] = useState<ScoreboardData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -112,6 +124,9 @@ export default function Documents() {
     api<Doc[]>("/documents")
       .then(setDocs)
       .catch((e) => setError((e as Error).message));
+    api<ScoreboardData>("/documents/scoreboard")
+      .then(setScoreboard)
+      .catch(() => {});
     if (isDocManager) {
       api<FlaggedDoc[]>("/documents/flagged")
         .then(setFlaggedDocs)
@@ -387,6 +402,44 @@ export default function Documents() {
 
       {error && <Notice tone="error">{error}</Notice>}
 
+      {/* 2. Documents Score Board Strip */}
+      <section aria-label="Documents scoreboard" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {docs === null ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <StatCard
+              label="Total Documents"
+              value={scoreboard?.total_documents ?? docs.length}
+              subtext={`${scoreboard?.total_pages ?? docs.reduce((a, b) => a + (b.page_count || 1), 0)} pages • ${scoreboard?.total_chunks ?? 0} indexed chunks`}
+            />
+            <StatCard
+              label="Ready to Search"
+              value={scoreboard?.active_documents ?? activeCount}
+              subtext={`${scoreboard?.ready_to_search_percentage ?? Math.round((activeCount / Math.max(docs.length, 1)) * 100)}% verified & indexed`}
+              tone="emerald"
+            />
+            <StatCard
+              label="Ingestion & OCR Health"
+              value={`${scoreboard?.health_score ?? (processingCount > 0 ? 85 : 100)}%`}
+              subtext={processingCount > 0 ? `${processingCount} documents processing` : "All pipelines operational"}
+              tone={processingCount > 0 ? "amber" : "emerald"}
+            />
+            <StatCard
+              label="Quarantined / Flagged"
+              value={scoreboard?.flagged_documents ?? (flaggedDocs.length || flaggedCount)}
+              subtext={flaggedCount > 0 ? "Prompt injection or syntax hazard" : "Zero active quarantine threats"}
+              tone={flaggedCount > 0 ? "rose" : "default"}
+            />
+          </>
+        )}
+      </section>
+
       {/* 3. Sticky Filter & Search Toolbar */}
       <div className="sticky top-0 z-10 -mx-4 sm:-mx-8 lg:-mx-12 px-4 sm:px-8 lg:px-12 py-3 bg-page/95 backdrop-blur-md border-b border-line">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -530,7 +583,10 @@ export default function Documents() {
                     </span>
                   </td>
                   <td className="px-4 py-3.5 text-xs text-muted font-mono">
-                    {doc.page_count > 0 ? `${doc.page_count} page${doc.page_count > 1 ? "s" : ""}` : "0 pages (scanned)"}
+                    <p>{doc.page_count > 0 ? `${doc.page_count} page${doc.page_count > 1 ? "s" : ""}` : "0 pages"}</p>
+                    {typeof doc.chunk_count === "number" && (
+                      <p className="text-[0.68rem] text-muted">{doc.chunk_count} chunk{doc.chunk_count === 1 ? "" : "s"}</p>
+                    )}
                   </td>
                   <td className="px-4 py-3.5">
                     <StatusPill status={doc.status} />

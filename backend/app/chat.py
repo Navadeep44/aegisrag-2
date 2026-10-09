@@ -233,12 +233,19 @@ def answer_question(
     db.add(reply)
     db.commit()
 
-    audit.log(db, user.tenant_id, user.id, "chat.query", reply.status,
-              conversation_id=conversation.id,
-              context_chunk_ids=sorted(context_ids),
-              context_document_ids=sorted({h.document.id for h in hits}),
-              cited_chunk_ids=valid, dropped_citations=dropped,
-              briefing_mode=briefing_mode)
+    audit.log(
+        db, user.tenant_id, user.id, "chat.query", reply.status,
+        conversation_id=conversation.id,
+        question=question,
+        user_roles=[r.name for r in user.roles],
+        user_name=user.name,
+        user_email=user.email,
+        context_chunk_ids=sorted(context_ids),
+        context_document_ids=sorted({h.document.id for h in hits}),
+        cited_chunk_ids=valid, dropped_citations=dropped,
+        suggested_resource=suggested_resource,
+        briefing_mode=briefing_mode,
+    )
 
     return {
         "conversation_id": conversation.id,

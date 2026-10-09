@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ArrowRight,
   UserPlus,
+  Pencil,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Button } from "../components/ui/Button";
@@ -21,7 +22,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { StatusPill } from "../components/ui/StatusPill";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
-import { api, patch, post } from "../lib/api";
+import { api, patch, post, put } from "../lib/api";
 import type { AccessRequest, Doc, User } from "../lib/types";
 import { hasPermission } from "../lib/types";
 
@@ -61,6 +62,15 @@ export default function AccessRequests() {
   const [targetUserId, setTargetUserId] = useState("");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Edit Request Drawer
+  const [showEditDrawer, setShowEditDrawer] = useState(false);
+  const [editTarget, setEditTarget] = useState<AccessRequest | null>(null);
+  const [editResourceType, setEditResourceType] = useState("document");
+  const [editResourceId, setEditResourceId] = useState("");
+  const [editTargetUserId, setEditTargetUserId] = useState("");
+  const [editReason, setEditReason] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   // Review Drawer
   const [reviewTarget, setReviewTarget] = useState<AccessRequest | null>(null);
@@ -141,7 +151,46 @@ export default function AccessRequests() {
     }
   }
 
+  function openEditDrawer(r: AccessRequest) {
+    setEditTarget(r);
+    setEditResourceType(r.resource_type);
+    setEditResourceId(r.resource_id || "");
+    setEditTargetUserId(r.target_user_id || "");
+    setEditReason(r.reason);
+    setShowEditDrawer(true);
+  }
+
+  async function handleEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editTarget) return;
+    if (editReason.trim().length < 5) {
+      showToast("Please provide a more detailed business reason (at least 5 characters).", "error");
+      return;
+    }
+
+    setEditSubmitting(true);
+    try {
+      await put(`/access-requests/${editTarget.id}`, {
+        resource_type: editResourceType,
+        resource_id: editResourceId.trim() || null,
+        reason: editReason.trim(),
+        target_user_id: editTargetUserId || undefined,
+      });
+      showToast("Access request updated successfully.", "success");
+      setShowEditDrawer(false);
+      setEditTarget(null);
+      loadData();
+    } catch (err) {
+      showToast((err as Error).message, "error");
+    } finally {
+      setEditSubmitting(false);
+    }
+  }
+
   const pendingRequests = requests.filter((r) => r.decision === "pending");
+  const myPendingRequests = pendingRequests.filter(
+    (r) => r.requester_id === user?.id || (user?.email && r.requester_name.toLowerCase().includes(user.name.toLowerCase()))
+  );
   const pastRequests = requests.filter((r) => {
     if (r.decision === "pending") return false;
     if (historyFilter === "all") return true;
@@ -194,6 +243,107 @@ export default function AccessRequests() {
         />
       </section>
 
+      {/* 2.5. Section: Your Submitted Requests (Editable) */}
+      {myPendingRequests.length > 0 && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between border-b border-line pb-3">
+            <div>
+              <h2 className="display text-2xl font-semibold text-ink">
+                Your Submitted Requests ({myPendingRequests.length})
+              </h2>
+              <p className="text-xs text-muted">
+                Pending requests submitted by you. You can update your business justification or requested resource before a decision is made.
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-xs">
+            <table className="w-full text-left text-sm hidden md:table">
+              <thead className="border-b border-line bg-surface-subtle/70 text-xs text-muted font-mono uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Resource</th>
+                  <th className="px-4 py-3 font-medium">Business Reason</th>
+                  <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Date</th>
+                  <th className="px-4 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {myPendingRequests.map((r) => {
+                  const timeInfo = formatRelativeTime(r.created_at);
+                  return (
+                    <tr key={r.id} className="hover:bg-surface-hover/60 transition-colors">
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="rounded bg-line px-1.5 py-0.5 text-[0.65rem] font-mono uppercase text-muted">
+                            {r.resource_type}
+                          </span>
+                          <span className="font-semibold text-ink">{r.resource_name}</span>
+                        </div>
+                        {r.target_user_name && (
+                          <p className="text-[0.7rem] text-sky-700 mt-0.5">For: {r.target_user_name}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 text-xs text-muted max-w-sm">
+                        <p className="truncate">{r.reason}</p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <StatusPill status="pending" />
+                      </td>
+                      <td className="px-4 py-3.5 text-xs text-muted font-mono" title={timeInfo.full}>
+                        {timeInfo.relative}
+                      </td>
+                      <td className="px-4 py-3.5 text-right">
+                        <Button
+                          kind="secondary"
+                          onClick={() => openEditDrawer(r)}
+                          className="flex items-center gap-1.5 text-xs inline-flex"
+                        >
+                          <Pencil className="h-3.5 w-3.5 text-accent" />
+                          <span>Edit Request</span>
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Mobile View */}
+            <div className="divide-y divide-line md:hidden">
+              {myPendingRequests.map((r) => {
+                const timeInfo = formatRelativeTime(r.created_at);
+                return (
+                  <div key={r.id} className="p-4 space-y-2.5">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-semibold text-ink text-sm">{r.resource_name}</p>
+                        <span className="rounded bg-line px-1.5 py-0.5 text-[0.65rem] font-mono uppercase text-muted">
+                          {r.resource_type}
+                        </span>
+                      </div>
+                      <StatusPill status="pending" />
+                    </div>
+                    <p className="text-xs text-muted">{r.reason}</p>
+                    <div className="flex items-center justify-between pt-2">
+                      <span className="text-[0.7rem] text-muted font-mono">{timeInfo.relative}</span>
+                      <Button
+                        kind="secondary"
+                        onClick={() => openEditDrawer(r)}
+                        className="flex items-center gap-1.5 text-xs"
+                      >
+                        <Pencil className="h-3.5 w-3.5 text-accent" />
+                        <span>Edit</span>
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* 3. Section 1: Needs Your Review */}
       {isApprover && (
         <section className="space-y-4">
@@ -229,6 +379,7 @@ export default function AccessRequests() {
                 <tbody className="divide-y divide-line">
                   {pendingRequests.map((r) => {
                     const timeInfo = formatRelativeTime(r.created_at);
+                    const canEdit = r.requester_id === user?.id || user?.is_admin;
                     return (
                       <tr key={r.id} className="hover:bg-surface-hover/60 transition-colors">
                         <td className="px-4 py-3.5">
@@ -252,15 +403,27 @@ export default function AccessRequests() {
                           {timeInfo.relative}
                         </td>
                         <td className="px-4 py-3.5 text-right">
-                          <Button
-                            kind="secondary"
-                            onClick={() => {
-                              setReviewTarget(r);
-                              setDecisionNote("");
-                            }}
-                          >
-                            Review
-                          </Button>
+                          <div className="flex items-center justify-end gap-2">
+                            {canEdit && (
+                              <Button
+                                kind="secondary"
+                                onClick={() => openEditDrawer(r)}
+                                className="flex items-center gap-1 text-xs"
+                              >
+                                <Pencil className="h-3.5 w-3.5 text-accent" />
+                                <span>Edit</span>
+                              </Button>
+                            )}
+                            <Button
+                              kind="secondary"
+                              onClick={() => {
+                                setReviewTarget(r);
+                                setDecisionNote("");
+                              }}
+                            >
+                              Review
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -270,29 +433,42 @@ export default function AccessRequests() {
 
               {/* Mobile View */}
               <div className="divide-y divide-line md:hidden">
-                {pendingRequests.map((r) => (
-                  <div key={r.id} className="p-4 space-y-2.5">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-semibold text-ink text-sm">{r.requester_name}</p>
-                        <p className="text-xs text-accent">{r.resource_name}</p>
+                {pendingRequests.map((r) => {
+                  const canEdit = r.requester_id === user?.id || user?.is_admin;
+                  return (
+                    <div key={r.id} className="p-4 space-y-2.5">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-semibold text-ink text-sm">{r.requester_name}</p>
+                          <p className="text-xs text-accent">{r.resource_name}</p>
+                        </div>
+                        <StatusPill status="pending" />
                       </div>
-                      <StatusPill status="pending" />
+                      <p className="text-xs text-muted">{r.reason}</p>
+                      <div className="flex justify-end gap-2 pt-2">
+                        {canEdit && (
+                          <Button
+                            kind="secondary"
+                            onClick={() => openEditDrawer(r)}
+                            className="flex items-center gap-1 text-xs"
+                          >
+                            <Pencil className="h-3.5 w-3.5 text-accent" />
+                            <span>Edit</span>
+                          </Button>
+                        )}
+                        <Button
+                          kind="secondary"
+                          onClick={() => {
+                            setReviewTarget(r);
+                            setDecisionNote("");
+                          }}
+                        >
+                          Review request
+                        </Button>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted">{r.reason}</p>
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        kind="secondary"
-                        onClick={() => {
-                          setReviewTarget(r);
-                          setDecisionNote("");
-                        }}
-                      >
-                        Review request
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -614,6 +790,121 @@ export default function AccessRequests() {
             </div>
           </div>
         )}
+      </Drawer>
+
+      {/* 7. Edit Access Request Drawer */}
+      <Drawer
+        isOpen={showEditDrawer}
+        onClose={() => {
+          setShowEditDrawer(false);
+          setEditTarget(null);
+        }}
+        title="Edit Access Request"
+        subtitle={editTarget ? `Modify pending request for ${editTarget.resource_name}` : undefined}
+      >
+        <form onSubmit={handleEdit} className="space-y-4">
+          {canDelegate && (
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">
+                Request on Behalf of (Delegated Request)
+              </label>
+              <select
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
+                value={editTargetUserId}
+                onChange={(e) => setEditTargetUserId(e.target.value)}
+              >
+                <option value="">Myself ({user?.name})</option>
+                {users
+                  .filter((u) => u.id !== user?.id)
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.roles.join(", ")} • Clearance L{u.clearance})
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">Resource Type</label>
+            <select
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
+              value={editResourceType}
+              onChange={(e) => setEditResourceType(e.target.value)}
+            >
+              <option value="document">Document Access</option>
+              <option value="role">Role Membership</option>
+              <option value="clearance">Clearance Elevation</option>
+            </select>
+          </div>
+
+          {editResourceType === "document" ? (
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">Select Document *</label>
+              <select
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
+                value={editResourceId}
+                onChange={(e) => setEditResourceId(e.target.value)}
+                required
+              >
+                <option value="">Choose a document...</option>
+                {docs.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.title} ({d.classification_label})
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-medium text-ink mb-1">
+                Resource Name or Identifier *
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. finance or Level 2 Confidential"
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
+                value={editResourceId}
+                onChange={(e) => setEditResourceId(e.target.value)}
+                required
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-ink mb-1">
+              Business Justification *
+            </label>
+            <textarea
+              required
+              rows={4}
+              placeholder="Explain why you need access to this resource..."
+              className="w-full rounded-xl border border-line bg-surface p-3 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none min-h-[100px]"
+              value={editReason}
+              onChange={(e) => setEditReason(e.target.value)}
+            />
+            <p className="text-[0.7rem] text-muted mt-1">
+              Updated justifications are recorded in the security audit trail and visible to approvers.
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-line">
+            <Button
+              type="button"
+              kind="secondary"
+              onClick={() => {
+                setShowEditDrawer(false);
+                setEditTarget(null);
+              }}
+              disabled={editSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={editSubmitting || !editReason.trim()}>
+              {editSubmitting ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </form>
       </Drawer>
     </div>
   );

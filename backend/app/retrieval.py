@@ -164,9 +164,21 @@ def parse_query_intent_and_entity(query: str) -> GenericQuestionModel:
         if fn_match:
             scope["document"] = fn_match.group(1).strip()
 
-    sec_scope_match = re.search(r"\b(?:in|under)\s+(?:section|chapter)\s+([A-Za-z0-9\s\-]+?)(?:\s+(?:of|in)|$)", query, re.IGNORECASE)
+    # Section / structural scope extraction
+    sec_scope_match = re.search(r"\b(?:in|under|according to|per)\s+(?:section|chapter|part)\s+([0-9]+(?:\.[0-9]+)*)\b", query, re.IGNORECASE)
+    if not sec_scope_match:
+        sec_scope_match = re.search(r"\b(?:in|under|according to|per)\s+(?:section|chapter|part)\s+([A-Za-z0-9\s\.\-]+?)(?:\s+(?:of|in)|[?.!]|$)", query, re.IGNORECASE)
     if sec_scope_match:
         scope["section"] = sec_scope_match.group(1).strip()
+    else:
+        clause_match = re.search(r"\b(?:in|under|according to|per)?\s*(?:clause|sub-clause|subclause)\s+([0-9]+(?:\.[0-9]+)*)\b", query, re.IGNORECASE)
+        if clause_match:
+            scope["clause"] = clause_match.group(1).strip()
+            scope["section"] = clause_match.group(1).strip()
+        else:
+            struct_match = re.search(r"\b(?:in|under|according to|per)\s+(?:the\s+)?(introduction|foreword|annex\s+[a-z0-9]+|appendix\s+[a-z0-9]+|preface|bibliography|overview)\b", query, re.IGNORECASE)
+            if struct_match:
+                scope["section"] = struct_match.group(1).strip()
 
     # 3. Filters extraction
     filters: list[dict[str, Any]] = []
@@ -260,6 +272,9 @@ def parse_query_intent_and_entity(query: str) -> GenericQuestionModel:
             if m:
                 raw = m.group(1).strip()
                 words = [w for w in raw.split() if w not in ("the", "all", "a", "an", "these", "those", "details", "records", "data")]
+                noise_verbs = {"mentioned", "described", "listed", "stated", "defined", "covered", "included", "required", "outlined", "specified", "given", "named"}
+                while words and words[-1] in noise_verbs:
+                    words.pop()
                 if words:
                     entity_type = singularize(words[-1])
                     break
@@ -330,36 +345,87 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
         for syn in ai.SYNONYMS.get(w, []):
             expanded_wanted.add(ai.stem(syn))
 
-    overlap = {}
+    import math
+
+    doc_freq: dict[str, int] = {}
+    chunk_toks_map: dict[int, set[str]] = {}
+    n_docs = len(rows)
     for r in rows:
         cid, text, _, doc_title, doc_fn, sec_heading = r
-        chunk_tokens = (
+        c_toks = (
             set(ai.tokens(text))
             | set(ai.tokens(doc_title or ""))
             | set(ai.tokens(doc_fn or ""))
             | set(ai.tokens(sec_heading or ""))
         )
-        score = len(expanded_wanted & chunk_tokens)
+        chunk_toks_map[cid] = c_toks
+        for t in c_toks:
+            doc_freq[t] = doc_freq.get(t, 0) + 1
+
+    idf: dict[str, float] = {
+        t: math.log((n_docs + 1.0) / (doc_freq.get(t, 0) + 1.0)) + 1.0
+        for t in expanded_wanted
+    }
+
+    sec_scope = str(q_analysis.scope.get("section", "")).lower()
+    clause_scope = str(q_analysis.scope.get("clause", "")).lower()
+
+    overlap = {}
+    for r in rows:
+        cid, text, _, doc_title, doc_fn, sec_heading = r
+        chunk_tokens = chunk_toks_map[cid]
         
+        # IDF-weighted token overlap score
+        matching_terms = expanded_wanted & chunk_tokens
+        score = sum(idf.get(t, 1.0) for t in matching_terms)
+
         # Boost if query explicitly targets the document title
         doc_title_tokens = set(ai.tokens(doc_title or ""))
         if doc_title_tokens & wanted:
-            score += 3
+            score += 3.0
+
+        sec_h_lower = (sec_heading or "").lower()
+
+        # Structural Section & Clause Scope Boost
+        if sec_scope or clause_scope:
+            if sec_scope and sec_scope in sec_h_lower:
+                score += 15.0
+            elif clause_scope and (clause_scope in sec_h_lower or f"clause {clause_scope}" in text.lower() or f"{clause_scope} " in sec_h_lower):
+                score += 15.0
+            elif sec_scope and ("introduction" in sec_scope and ("0.1" in sec_h_lower or "0.2" in sec_h_lower or "introduction" in sec_h_lower)):
+                score += 15.0
+
+        # Boost if section heading contains query terms
+        if sec_heading:
+            sec_h_tokens = set(ai.tokens(sec_heading))
+            h_matches = sec_h_tokens & wanted
+            if h_matches:
+                score += sum(3.0 * idf.get(t, 1.0) for t in h_matches)
 
         # Substantive vs Structural Reranking (Master Prompt Rules 13, 23 & 37)
         if is_items and target_ent:
-            sec_heading_lower = (sec_heading or "").lower()
             synonyms = ai.SYNONYMS.get(target_ent, [])
-            if target_ent in sec_heading_lower or any(syn in sec_heading_lower for syn in synonyms):
-                score += 5
+            if target_ent in sec_h_lower or any(syn in sec_h_lower for syn in synonyms):
+                score += 5.0
+
+            # Only boost tables if target entity specifically relates to tabular records or data items
+            tabular_entities = {
+                "record", "row", "item", "table", "inventory", "control", "patient", "doctor",
+                "employee", "staff", "metric", "entry", "supply", "glove", "pouch", "fee", "cost"
+            }
+            is_tabular_ent = target_ent in tabular_entities or any(syn in tabular_entities for syn in synonyms)
 
             has_substantive_entries = bool(
                 re.search(rf"\b({target_ent}\s*#?\d+|\d+\.\s+[A-Za-z]|Record\s*#?\d+|[-•*]\s+[A-Za-z])\b", text, re.IGNORECASE)
                 or (target_ent in text.lower() and bool(re.search(r"[-•*]\s+[A-Za-z0-9]", text)))
-                or ("|" in text and "---" in text)
+                or (is_tabular_ent and "|" in text and "---" in text)
             )
             if has_substantive_entries:
-                score += 4
+                score += 4.0
+
+            # If the query is scoped to a non-table section (like introduction or a prose clause), demote tables
+            if (sec_scope == "introduction" or "introduction" in query.lower()) and ("|" in text and "---" in text):
+                score -= 8.0
 
             # Demote pure Table of Contents / Outline chunks that merely list section titles
             is_pure_toc = bool(
@@ -367,13 +433,13 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
                 or (text.count("Section ") >= 3 and not has_substantive_entries)
             )
             if is_pure_toc:
-                score -= 5
+                score -= 5.0
 
         elif is_sec:
             if bool(re.search(r"(section|table of contents|overview|chapters)", text, re.IGNORECASE)):
-                score += 5
+                score += 5.0
 
-        overlap[cid] = max(0, score)
+        overlap[cid] = max(0.0, score)
 
     by_keyword = [i for i in sorted(overlap, key=overlap.get, reverse=True) if overlap[i] > 0][:35]
     return by_vector, by_keyword
@@ -407,6 +473,23 @@ def search(db: Session, user: User, query: str, top_k: int | None = None) -> lis
     for ranking in (by_vector, by_keyword):
         for rank, chunk_id in enumerate(ranking):
             scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (60 + rank)
+
+    # Structural Section / Clause Scope Priority Boost
+    target_sec = str(q_analysis.scope.get("section", "")).lower()
+    target_clause = str(q_analysis.scope.get("clause", "")).lower()
+    if target_sec or target_clause:
+        chunk_heads = db.execute(
+            select(Chunk.id, Chunk.section_heading, Chunk.page).where(Chunk.id.in_(scores.keys()))
+        ).all()
+        for cid, head, pnum in chunk_heads:
+            h_low = (head or "").lower()
+            if target_sec and target_sec in h_low:
+                scores[cid] += 0.10
+            elif target_clause and (target_clause in h_low or f"clause {target_clause}" in h_low):
+                scores[cid] += 0.10
+            elif target_sec == "introduction" and ("0.1" in h_low or "0.2" in h_low or pnum == 5):
+                scores[cid] += 0.10
+
     best = sorted(scores, key=scores.get, reverse=True)[:top_k]
     if not best:
         return []

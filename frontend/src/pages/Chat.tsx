@@ -60,12 +60,20 @@ const ROLE_TOPICS: Record<string, { label: string; questions: string[] }> = {
   },
 };
 
+type ChatSuggestions = {
+  suggestions: string[];
+  role: string;
+  accessible_documents_count: number;
+  has_access: boolean;
+};
+
 export default function Chat() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [chatSuggestions, setChatSuggestions] = useState<ChatSuggestions | null>(null);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -97,6 +105,9 @@ export default function Chat() {
 
   useEffect(() => {
     loadSessions();
+    api<ChatSuggestions>("/chat/suggestions")
+      .then(setChatSuggestions)
+      .catch(() => {});
   }, []);
 
   // Handle URL query param (?q=...)
@@ -193,18 +204,11 @@ export default function Chat() {
     }
   }
 
-  let promptList = ROLE_TOPICS[primaryRole]?.questions || ROLE_TOPICS.employee.questions;
-  if (activeCategory === "finance") promptList = ROLE_TOPICS.finance.questions;
-  else if (activeCategory === "hr") promptList = ROLE_TOPICS.hr.questions;
-  else if (activeCategory === "engineering") promptList = ROLE_TOPICS.engineering.questions;
-  else if (activeCategory === "all") {
-    promptList = [
-      ...ROLE_TOPICS.employee.questions.slice(0, 2),
-      ...ROLE_TOPICS.finance.questions.slice(0, 2),
-      ...ROLE_TOPICS.hr.questions.slice(0, 2),
-      ...ROLE_TOPICS.engineering.questions.slice(0, 2),
-    ];
-  }
+  const dynamicSuggestions = chatSuggestions?.suggestions || [];
+  const promptList =
+    dynamicSuggestions.length > 0
+      ? dynamicSuggestions
+      : ROLE_TOPICS[primaryRole]?.questions || ROLE_TOPICS.employee.questions;
 
   const hasMessages = messages.length > 0;
 
@@ -269,7 +273,21 @@ export default function Chat() {
 
             {/* Prompt Starter Cards */}
             <div className="w-full flex flex-col gap-2.5 pt-1 text-left">
-              {promptList.slice(0, 3).map((q) => (
+              {chatSuggestions && (
+                <div className="flex items-center justify-between px-1 text-[0.72rem] text-slate-500 font-medium">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    <span>Recommended for <strong className="text-slate-800">{chatSuggestions.role}</strong></span>
+                  </span>
+                  <span className="font-mono text-slate-600">
+                    {chatSuggestions.has_access
+                      ? `${chatSuggestions.accessible_documents_count} authorized doc${chatSuggestions.accessible_documents_count === 1 ? "" : "s"}`
+                      : "No docs authorized"}
+                  </span>
+                </div>
+              )}
+
+              {promptList.slice(0, 4).map((q) => (
                 <button
                   key={q}
                   onClick={() => ask(q)}

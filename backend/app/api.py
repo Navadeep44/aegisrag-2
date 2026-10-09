@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -39,6 +40,7 @@ from app.models import (
     Document,
     DocumentAccess,
     IngestionJob,
+    Message,
     Role,
     Tenant,
     User,
@@ -118,6 +120,13 @@ class AccessRequestIn(BaseModel):
     resource_type: str  # document | role | clearance
     resource_id: str | None = None
     reason: str = Field(min_length=3, max_length=1000)
+    target_user_id: str | None = None
+
+
+class EditAccessRequestIn(BaseModel):
+    resource_type: str | None = None
+    resource_id: str | None = None
+    reason: str | None = Field(default=None, min_length=3, max_length=1000)
     target_user_id: str | None = None
 
 
@@ -1094,6 +1103,68 @@ def list_access_requests(
     ]
 
 
+@router.put("/access-requests/{request_id}")
+@router.patch("/access-requests/{request_id}/edit")
+def edit_access_request(
+    request_id: str,
+    body: EditAccessRequestIn,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    req = db.get(AccessRequest, request_id)
+    if not req or req.tenant_id != user.tenant_id:
+        raise HTTPException(404, "Access request not found.")
+    
+    can_manage = user.has_permission("tenant.manage") or user.is_admin
+    if req.requester_id != user.id and not can_manage:
+        raise HTTPException(403, "You can only edit access requests you submitted.")
+
+    if req.decision != "pending":
+        raise HTTPException(400, f"Cannot edit an access request that has already been {req.decision}.")
+
+    if body.resource_type is not None:
+        req.resource_type = body.resource_type
+    if body.resource_id is not None:
+        req.resource_id = body.resource_id
+    if body.reason is not None and body.reason.strip():
+        req.reason = body.reason.strip()
+    if body.target_user_id is not None:
+        if body.target_user_id != user.id:
+            can_delegate = any(r in ("team_lead", "department_manager", "admin", "organization_owner", "iam_admin") for r in user.role_names)
+            if not can_delegate:
+                raise HTTPException(403, "You do not have permission to request access on behalf of other users.")
+        req.target_user_id = body.target_user_id if body.target_user_id != user.id else None
+
+    db.commit()
+    db.refresh(req)
+    audit.log(
+        db,
+        user.tenant_id,
+        user.id,
+        "access_request.update",
+        "allowed",
+        request_id=req.id,
+        resource_type=req.resource_type,
+        resource_id=req.resource_id,
+        target_user_id=req.target_user_id,
+    )
+    doc_titles = dict(db.execute(select(Document.id, Document.title).where(Document.tenant_id == user.tenant_id)).all())
+    user_names = dict(db.execute(select(User.id, User.name).where(User.tenant_id == user.tenant_id)).all())
+    return {
+        "id": req.id,
+        "requester_id": req.requester_id,
+        "requester_name": user_names.get(req.requester_id, user.name),
+        "target_user_id": req.target_user_id,
+        "target_user_name": user_names.get(req.target_user_id, "") if req.target_user_id else "",
+        "resource_type": req.resource_type,
+        "resource_id": req.resource_id,
+        "resource_name": doc_titles.get(req.resource_id, req.resource_id or "General Access"),
+        "reason": req.reason,
+        "decision": req.decision,
+        "created_at": iso(req.created_at),
+    }
+
+
 @router.patch("/access-requests/{request_id}")
 def decide_access_request(
     request_id: str,
@@ -1164,15 +1235,55 @@ def decide_access_request(
 def list_documents(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
     """Employees see documents they can read. Admins and Document Managers see every
     document's title and access list so they can manage it, but not its content."""
+    chunk_counts = dict(
+        db.execute(
+            select(Chunk.document_id, func.count(Chunk.id))
+            .where(Chunk.tenant_id == user.tenant_id)
+            .group_by(Chunk.document_id)
+        ).all()
+    )
     can_manage = user.has_permission("document.grant.manage") or user.has_permission("document.upload") or user.is_admin
     if can_manage:
         docs = db.execute(select(Document).where(Document.tenant_id == user.tenant_id)
                           .order_by(Document.title)).scalars().all()
         readable = readable_document_ids(db, user)
         labels = _labels(db, user.tenant_id)
-        return [{**doc_out(d, True, labels), "readable": d.id in readable} for d in docs]
+        return [{**doc_out(d, True, labels), "readable": d.id in readable, "chunk_count": chunk_counts.get(d.id, 0)} for d in docs]
     docs = db.execute(select(Document).where(readable_clause(user)).order_by(Document.title))
-    return [{**doc_out(d), "readable": True} for d in docs.scalars()]
+    return [{**doc_out(d), "readable": True, "chunk_count": chunk_counts.get(d.id, 0)} for d in docs.scalars()]
+
+
+@router.get("/documents/scoreboard")
+def get_documents_scoreboard(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Returns catalog metrics and ingestion health scoreboard for the Documents page."""
+    can_manage = user.has_permission("document.grant.manage") or user.has_permission("document.upload") or user.is_admin
+    t_id = user.tenant_id
+    all_docs = db.execute(select(Document).where(Document.tenant_id == t_id)).scalars().all()
+    readable_ids = readable_document_ids(db, user)
+    
+    total_docs = len(all_docs)
+    active_docs = sum(1 for d in all_docs if d.status == "active")
+    processing_docs = sum(1 for d in all_docs if d.status == "processing")
+    flagged_docs = sum(1 for d in all_docs if d.flagged or d.status == "flagged")
+    total_pages = sum(d.page_count for d in all_docs)
+    total_chunks = db.execute(select(func.count(Chunk.id)).where(Chunk.tenant_id == t_id)).scalar() or 0
+
+    health_score = round((active_docs / max(total_docs, 1)) * 100) if total_docs > 0 else 100
+
+    return {
+        "total_documents": total_docs,
+        "accessible_documents": len(readable_ids),
+        "active_documents": active_docs,
+        "processing_documents": processing_docs,
+        "flagged_documents": flagged_docs,
+        "total_pages": total_pages,
+        "total_chunks": total_chunks,
+        "health_score": health_score,
+        "can_manage": can_manage,
+    }
 
 
 @router.post("/documents/upload")
@@ -1501,6 +1612,106 @@ def chat_session(
     }
 
 
+@router.get("/chat/suggestions")
+def get_chat_suggestions(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Returns dynamic recommended questions tailored strictly to the current user's
+    assigned roles and the documents they actually have access to in this workspace."""
+    readable_ids = readable_document_ids(db, user)
+    docs = db.execute(
+        select(Document).where(Document.id.in_(readable_ids), Document.status == "active")
+    ).scalars().all() if readable_ids else []
+
+    user_roles = [r.name.lower() for r in user.roles]
+    role_labels = [r.name for r in user.roles] or ["Employee"]
+    primary_role_label = role_labels[0]
+
+    # If user has no accessible documents, return clear guidance
+    if not docs:
+        return {
+            "suggestions": [
+                "How do I request access to organization documents?",
+                "What documents are available in this workspace?",
+                "Who is the administrator for this tenant?",
+            ],
+            "role": primary_role_label,
+            "accessible_documents_count": 0,
+            "has_access": False,
+        }
+
+    suggestions = []
+    seen = set()
+
+    def add_q(q: str):
+        if q not in seen and len(suggestions) < 6:
+            seen.add(q)
+            suggestions.append(q)
+
+    # 1. Inspect accessible document titles and generate specific queries
+    for d in docs:
+        t_low = d.title.lower()
+        fn_low = d.filename.lower()
+
+        # Dental Clinic / Healthcare documents
+        if any(k in t_low or k in fn_low for k in ["dental", "clinic", "patient", "apex", "doctor", "steril"]):
+            if any("doctor" in r or "physician" in r or "dentist" in r for r in user_roles):
+                add_q("Which doctor is listed under DOC-0003 and what is their specialty?")
+                add_q("For patient APX-2026-0002, what is the procedure, fee, and outstanding balance?")
+                add_q("What were the clinical procedure outcomes and audit metrics reported?")
+            elif any("nurse" in r or "hygienist" in r or "assistant" in r for r in user_roles):
+                add_q("What is the minimum exposure time for wrapped instruments in a gravity sterilizer at 121°C?")
+                add_q("Which inventory item has code ADS-IMP-0002 and what is its reorder level?")
+                add_q("What was the overall infection rate during the reported audit cycle?")
+            else:
+                add_q("What is the minimum exposure time for wrapped instruments at 121°C?")
+                add_q("What is the outstanding balance for patient APX-2026-0006?")
+                add_q("Compare the gravity-displacement and pre-vacuum sterilization cycles.")
+
+        # ISO 27001 / Security / Compliance standards
+        elif any(k in t_low or k in fn_low for k in ["iso", "27001", "security", "isms", "compliance"]):
+            add_q("What are the three main information security principles mentioned in the introduction?")
+            add_q("What are the requirements for understanding the organization according to clause 4.1?")
+            add_q("What are the requirements for the information security policy in clause 5.2?")
+            add_q("What control governs privileged utility programs in Annex A?")
+
+        # Financial / Invoice / Revenue documents
+        elif any(k in t_low or k in fn_low for k in ["invoice", "revenue", "financial", "billing", "salary", "expense"]):
+            if any("finance" in r or "accounting" in r or "admin" in r for r in user_roles):
+                add_q(f"What is the total billed amount in {d.title}?")
+                add_q(f"What are the payment terms and due dates in {d.title}?")
+            else:
+                add_q(f"What financial metrics are summarized in {d.title}?")
+
+        # HR / Policy / Handbook
+        elif any(k in t_low or k in fn_low for k in ["leave", "policy", "handbook", "hr", "benefit", "onboard"]):
+            add_q("What are the key policy guidelines and requirements?")
+            add_q("What are the standard operating procedures outlined in the document?")
+
+        # Generic Document Section Grounded Questions
+        sections = d.sections_metadata or []
+        for s in sections[:2]:
+            h = s.get("heading")
+            if h and len(h) < 50 and not any(k in h.lower() for k in ["table of contents", "outline", "cover"]):
+                clean_h = re.sub(r"^[0-9\.\-\s]+", "", h).strip()
+                if clean_h:
+                    add_q(f"What are the requirements specified under {clean_h}?")
+
+    # Fallback / General questions grounded in accessible document titles
+    if len(suggestions) < 3:
+        for d in docs:
+            add_q(f"What are the key guidelines documented in {d.title}?")
+            add_q(f"Summarize the main provisions and requirements of {d.title}.")
+
+    return {
+        "suggestions": suggestions[:4],
+        "role": primary_role_label,
+        "accessible_documents_count": len(docs),
+        "has_access": True,
+    }
+
+
 # ---------- policy simulator ----------
 
 @router.post("/policies/simulate")
@@ -1556,27 +1767,95 @@ def audit_events(
         stmt = stmt.where(AuditEvent.action == action)
     names = _labels(db, admin.tenant_id)
     titles = dict(db.execute(select(Document.id, Document.title).where(Document.tenant_id == admin.tenant_id)).all())
-    events = db.execute(stmt.order_by(AuditEvent.id.desc()).limit(200)).scalars()
-    return [
-        {
+    events = db.execute(stmt.order_by(AuditEvent.id.desc()).limit(200)).scalars().all()
+    user_map = {u.id: u for u in db.execute(select(User).where(User.tenant_id == admin.tenant_id)).scalars()}
+    out_events = []
+    for e in events:
+        u = user_map.get(e.user_id)
+        q = e.detail.get("question") if e.detail else None
+        if not q and e.action == "chat.query" and e.detail and e.detail.get("conversation_id"):
+            q = db.execute(
+                select(Message.content)
+                .where(Message.conversation_id == e.detail["conversation_id"], Message.role == "user")
+                .order_by(Message.id.desc())
+            ).scalars().first()
+
+        roles = e.detail.get("user_roles") if e.detail else None
+        if not roles and u:
+            roles = [r.name for r in u.roles]
+
+        out_events.append({
             "id": e.id,
             "time": iso(e.created_at),
             "user": names.get(e.user_id, names.get(e.actor, e.actor or "-")),
+            "user_email": u.email if u else (e.detail.get("user_email") if e.detail else ""),
+            "roles": roles or [],
+            "question": q,
             "actor": e.actor or e.user_id,
             "action": e.action,
             "decision": e.decision,
             "correlation_id": e.correlation_id,
             "detail": e.detail,
+            "suggested_resource": e.detail.get("suggested_resource") if e.detail else None,
             "documents": [
                 titles.get(i, "deleted document")
                 for i in (
                     e.detail.get("context_document_ids")
                     or ([e.detail["document_id"]] if e.detail.get("document_id") else [])
                 )
-            ],
-        }
-        for e in events
-    ]
+            ] if e.detail else [],
+        })
+    return out_events
+
+
+@router.get("/audit/unauthorized-queries")
+def get_unauthorized_queries(
+    admin: User = Depends(require_any_permission("audit.read", "tenant.manage")),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Returns questions asked by assigned roles that received no authorized source (abstained),
+    along with the user's assigned roles, timestamp, and inaccessible suggested resources."""
+    stmt = (
+        select(AuditEvent)
+        .where(
+            AuditEvent.tenant_id == admin.tenant_id,
+            AuditEvent.action == "chat.query",
+            AuditEvent.decision == "abstained",
+        )
+        .order_by(AuditEvent.id.desc())
+        .limit(100)
+    )
+    events = db.execute(stmt).scalars().all()
+    user_map = {u.id: u for u in db.execute(select(User).where(User.tenant_id == admin.tenant_id)).scalars()}
+    
+    out = []
+    for e in events:
+        u = user_map.get(e.user_id)
+        q = e.detail.get("question") if e.detail else None
+        if not q and e.detail and e.detail.get("conversation_id"):
+            q = db.execute(
+                select(Message.content)
+                .where(Message.conversation_id == e.detail["conversation_id"], Message.role == "user")
+                .order_by(Message.id.desc())
+            ).scalars().first()
+        
+        roles = e.detail.get("user_roles") if e.detail else None
+        if not roles and u:
+            roles = [r.name for r in u.roles]
+
+        out.append({
+            "id": e.id,
+            "time": iso(e.created_at),
+            "user_id": e.user_id,
+            "user_name": u.name if u else (e.actor or "Unknown"),
+            "user_email": u.email if u else "",
+            "roles": roles or ["Employee"],
+            "question": q or "Query with no authorized sources found",
+            "decision": "abstained",
+            "suggested_resource": e.detail.get("suggested_resource") if e.detail else None,
+            "conversation_id": e.detail.get("conversation_id") if e.detail else None,
+        })
+    return out
 
 
 @router.get("/audit/export")
@@ -2246,8 +2525,12 @@ def get_dashboard_stats(
             "suspended_tenants": sum(1 for t in tenants if t.status == "suspended"),
             "total_chunks": total_chunks,
             "total_documents": total_docs,
+            "accessible_documents": total_docs,
             "total_users": total_users,
             "total_audits": total_audits,
+            "my_queries": db.execute(select(func.count(AuditEvent.id)).where(AuditEvent.user_id == user.id, AuditEvent.action == "chat.query")).scalar() or 0,
+            "total_queries": db.execute(select(func.count(AuditEvent.id)).where(AuditEvent.action == "chat.query")).scalar() or 0,
+            "pending_requests_count": db.execute(select(func.count(AccessRequest.id)).where(AccessRequest.decision == "pending")).scalar() or 0,
         }
 
     t_id = user.tenant_id

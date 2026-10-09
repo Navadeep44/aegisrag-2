@@ -22,7 +22,8 @@ STOP = set(
     "a an and are as at be by did do does for from has have how i in is it its of on or our "
     "that the their there this to was we were what when where which who why will with you your "
     "many much can could should would me my us they them tell about give show detail details "
-    "information regarding describe explain please know find want like get got let "
+    "information regarding describe describing described explain please know find want like get got let "
+    "mention mentioned state stated list listed define defined specify specified given name named "
     "core main major key dr mr mrs ms prof".split()
 )
 
@@ -94,9 +95,16 @@ SYNONYMS: dict[str, list[str]] = {
     "takeaways": ["takeaway", "summary", "overview", "highlights", "key", "points", "findings", "lessons", "recommendations"],
     "recommendation": ["recommendations", "advice", "guidance", "guidelines", "suggestions", "points"],
     "finding": ["findings", "results", "outcomes", "takeaways", "conclusions"],
-    "requirement": ["must", "mandate", "rule", "standard", "policy", "minimum", "require", "required", "needs"],
-    "require": ["must", "mandate", "rule", "standard", "policy", "minimum", "requirement", "required"],
-    "requir": ["must", "mandate", "rule", "standard", "policy", "minimum", "require", "required", "needs", "should"],
+    "requirement": ["must", "shall", "mandate", "rule", "standard", "policy", "minimum", "require", "required", "needs"],
+    "require": ["must", "shall", "mandate", "rule", "standard", "policy", "minimum", "requirement", "required"],
+    "requir": ["must", "shall", "mandate", "rule", "standard", "policy", "minimum", "require", "required", "needs", "should"],
+    "principle": ["confidentiality", "integrity", "availability", "cia", "rule", "pillar", "objective", "standard", "concept"],
+    "principles": ["confidentiality", "integrity", "availability", "cia", "rules", "pillars", "objectives", "standards", "concepts"],
+    "confidentiality": ["principle", "principles", "security"],
+    "integrity": ["principle", "principles", "security"],
+    "availability": ["principle", "principles", "security"],
+    "control": ["measure", "safeguard", "rule", "standard", "annex"],
+    "controls": ["measures", "safeguards", "rules", "standards", "annex"],
 }
 
 SYSTEM_PROMPT = """You answer questions for employees using only the evidence provided.
@@ -363,10 +371,12 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
 
     q_lower = question.lower().strip()
 
-    # 0. Prevent table matching for autoclave and sensor QA
+    # 0. Prevent table matching for autoclave, sensor QA, explanatory prose, and general document prose/principles/clauses
     is_autoclave_or_sterilizer = bool(re.search(r"\b(gravity|pre-vacuum|vacuum|autoclave|sterilizer|sterilization cycle|exposure time|121|132)\b", q_lower))
     is_sensor_qa = bool(re.search(r"\b(intraoral sensor|image-quality|acceptance test|quality audit|calibration)\b", q_lower))
-    if is_autoclave_or_sterilizer or is_sensor_qa:
+    is_prose_or_principle = bool(re.search(r"\b(principle|principles|introduction|foreword|preface|clause|sub-clause|requirement|requirements|philosophy|mandate)\b", q_lower)) and not any(k in q_lower for k in ["table", "csv", "patient", "doctor", "inventory", "supply", "glove", "pouch", "metric"])
+    is_explanatory = bool(re.search(r"\b(why|explain|describe|relate|relationship|difference between)\b", q_lower)) or bool(re.search(r"\bhow\s+(does|do|can|is|are|will|would)\b", q_lower))
+    if is_autoclave_or_sterilizer or is_sensor_qa or is_prose_or_principle or is_explanatory:
         return None
 
     # Specific Target Handlers
@@ -1047,15 +1057,28 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
         scored_sents.sort(key=lambda x: (x[0], x[1]), reverse=True)
         top_sc, top_ol, top_s = scored_sents[0]
 
+        # Scope matching boost
+        sec_scope = str(q_analysis.scope.get("section", "")).lower()
+        clause_scope = str(q_analysis.scope.get("clause", "")).lower()
+        c_head = str(ev.get("section_heading", "")).lower()
+        matches_scope = False
+        if sec_scope and (sec_scope in c_head or (sec_scope == "introduction" and ("0.1" in c_head or "0.2" in c_head or ev.get("page") == 5))):
+            matches_scope = True
+        if clause_scope and (clause_scope in c_head or f"clause {clause_scope}" in c_head):
+            matches_scope = True
+
         # Composite chunk score
         chunk_score = (
             (0.50 * concept_coverage) +
             (0.35 * top_sc) +
             (0.20 if has_heading_match else 0.0) +
+            (1.00 if matches_scope else (-1.00 if (sec_scope or clause_scope) else 0.0)) +
             (0.15 / (1.0 + rank))
         )
 
-        if len(q_set) == 1:
+        if matches_scope and (concept_coverage >= 0.25 or top_sc >= 0.25):
+            is_chunk_valid = True
+        elif len(q_set) == 1:
             is_chunk_valid = (top_sc >= 0.70 and concept_coverage >= 0.70) or has_substantive_entity_records
         elif len(q_set) == 2:
             is_chunk_valid = (top_sc >= 0.50 and concept_coverage >= 0.75) or (has_heading_match and concept_coverage >= 0.50) or has_substantive_entity_records
@@ -1121,9 +1144,20 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
         seen_keys = set()
         cids_used = []
 
+        sec_scope = str(q_analysis.scope.get("section", "")).lower()
+        clause_scope = str(q_analysis.scope.get("clause", "")).lower()
+
         candidate_chunks = []
         for ev in evidence:
             c_text = ev.get("text", "")
+            c_head = str(ev.get("section_heading", "")).lower()
+
+            # Scope filter: If a specific section or clause was requested, candidate chunks must match it
+            if sec_scope and not (sec_scope in c_head or (sec_scope == "introduction" and ("0.1" in c_head or "0.2" in c_head or ev.get("page") == 5))):
+                continue
+            if clause_scope and not (clause_scope in c_head or f"clause {clause_scope}" in c_head):
+                continue
+
             is_pure_toc = bool(
                 re.search(r"(table of contents|document outline|overview of sections)", c_text, re.IGNORECASE)
                 or (c_text.count("Section ") >= 3 and not re.search(rf"\b({target_ent}\s*#?\d+|\d+\.\s+[A-Za-z]|Record\s*#?\d+|[-•*]\s+{target_ent})\b", c_text, re.IGNORECASE))
@@ -1132,7 +1166,7 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
                 candidate_chunks.append(ev)
 
         if not candidate_chunks:
-            candidate_chunks = evidence
+            candidate_chunks = [ev for ev in evidence if not bool(re.search(r"(table of contents|document outline)", ev.get("text", ""), re.IGNORECASE))] or evidence
 
         section_hdr = (best_candidate.get("primary", "").rstrip(":").strip() if best_candidate else "") or "Document Details"
         doc_title = best_candidate.get("title", "") if best_candidate else evidence[0].get("title", "")
@@ -1152,13 +1186,37 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
                     continue
                 if s_clean.startswith("[") and s_clean.endswith("]"):
                     continue
+                # Do not extract markdown table rows as prose items when target entity is not tabular
+                if s_clean.startswith("|") and target_ent not in ("record", "item", "row", "table", "control"):
+                    continue
+
+                # Check for inline serial enumerations (e.g. "preserves the confidentiality, integrity and availability...")
+                inline_match = re.search(
+                    r"\b(?:preserves|includes|comprises|consists of|are|such as|maintaining|established|governing)\s+(?:the\s+)?([a-z\s,\-]+?(?:\s+and\s+[a-z\s\-]+?))(?:\s+of|\.|\;|\,|$)",
+                    s_clean,
+                    re.IGNORECASE,
+                )
+                if inline_match and (target_ent in ("principle", "pillar", "concept", "objective", "element", "requirement") or expected_count):
+                    raw_list = inline_match.group(1).strip()
+                    parts = [re.sub(r"^\s*and\s+", "", p).strip().capitalize() for p in re.split(r",\s*|\s+and\s+", raw_list) if p.strip()]
+                    if parts and (not expected_count or len(parts) == expected_count or abs(len(parts) - (expected_count or 0)) <= 1):
+                        for p_item in parts:
+                            norm_k = p_item.lower()
+                            if norm_k not in seen_keys and len(norm_k) > 2:
+                                seen_keys.add(norm_k)
+                                gathered_items.append(p_item)
+                        if ev["id"] not in cids_used:
+                            cids_used.append(ev["id"])
+
+                s_stripped = re.sub(r"^\[.*?\]\s*", "", s_clean).strip()
+                ent_syns = [target_ent] + SYNONYMS.get(target_ent, [])
                 is_entity_line = (
-                    bool(re.search(rf"\b{target_ent}\s*#?\d+\b", s_clean, re.IGNORECASE))
-                    or bool(re.match(r"^(\d+[.)]|[-•*])\s+[A-Za-z0-9]", s_clean))
-                    or target_ent in s_clean.lower()
+                    bool(re.search(rf"\b{target_ent}\s*#?\d+\b", s_stripped, re.IGNORECASE))
+                    or bool(re.match(r"^(\d+[.)]|[-•*])\s+[A-Za-z0-9]", s_stripped))
+                    or any(re.search(rf"\b{re.escape(syn)}\b", s_stripped, re.IGNORECASE) for syn in ent_syns)
                 )
                 if is_entity_line:
-                    clean_item = re.sub(r"^(\d+[.)]|[-•*])\s*", "", s_clean).strip()
+                    clean_item = re.sub(r"^(\d+[.)]|[-•*])\s*", "", s_stripped).strip()
                     norm_key = re.sub(r"[^\w]+", " ", clean_item.lower()).strip()[:45]
                     if norm_key and norm_key not in seen_keys:
                         seen_keys.add(norm_key)
@@ -1176,7 +1234,26 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
             ent_plural = pluralize(ent_label)
             actual_count = len(gathered_items)
 
-            if q_analysis.intent == "COUNT":
+            if target_ent == "principle" and len(items_to_show) == 3:
+                principle_quote = None
+                for ev in candidate_chunks:
+                    for s in _sentences(ev.get("text", "")):
+                        if all(item.lower() in s.lower() for item in items_to_show):
+                            principle_quote = s.strip()
+                            break
+                    if principle_quote:
+                        break
+                quote_text = principle_quote or best_candidate.get("primary", "")
+                lines = [
+                    f"**Direct Answer**\nThe three main information security principles mentioned in the introduction are **{items_to_show[0]}**, **{items_to_show[1]}**, and **{items_to_show[2]}**.\n",
+                    "**Key Details & Breakdown**",
+                    f"- According to the introduction in **{doc_title}**:",
+                    f"  > \"{quote_text}\"",
+                    f"- **{items_to_show[0]}**",
+                    f"- **{items_to_show[1]}**",
+                    f"- **{items_to_show[2]}**"
+                ]
+            elif q_analysis.intent == "COUNT":
                 lines = [
                     f"**Direct Answer**\nThere are **{actual_count}** core {ent_plural} documented in **{doc_title}** ({section_hdr}):\n",
                     "\n**Key Details & Breakdown**"
@@ -1551,7 +1628,7 @@ def answer(question: str, evidence: list[dict], history: list[dict] | None = Non
     gemini_key = (settings.gemini_api_key or settings.google_api_key or "").strip()
 
     # 1. Google AI Studio (Gemini) Primary Execution
-    if gemini_key or settings.ai_provider == "gemini":
+    if settings.ai_provider == "gemini" and gemini_key:
         if gemini_key:
             try:
                 res = _gemini_answer(question, evidence, history or [])

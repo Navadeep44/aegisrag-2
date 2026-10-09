@@ -23,7 +23,7 @@ import { StatusPill } from "../components/ui/StatusPill";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { api, downloadFile } from "../lib/api";
-import { hasPermission, type AuditEvent, type TestReport } from "../lib/types";
+import { hasPermission, type AuditEvent, type TestReport, type UnauthorizedQuery } from "../lib/types";
 
 const ACTIONS: Record<string, string> = {
   "chat.query": "Asked a question",
@@ -35,6 +35,7 @@ const ACTIONS: Record<string, string> = {
   "ingest.injection_flag": "Quarantined prompt injection upload",
   "policy.simulate": "Ran policy simulation",
   "access_request.create": "Submitted access request",
+  "access_request.update": "Updated access request",
   "access_request.decide": "Decided access request",
   "user.invite": "Invited team user",
   "user.status_change": "Updated user status",
@@ -59,6 +60,7 @@ export default function Security() {
 
   const [report, setReport] = useState<TestReport | null>(null);
   const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [unauthorizedQueries, setUnauthorizedQueries] = useState<UnauthorizedQuery[]>([]);
   const [filter, setFilter] = useState("");
   const [auditSearch, setAuditSearch] = useState("");
   const [running, setRunning] = useState(false);
@@ -74,6 +76,7 @@ export default function Security() {
     Promise.all([
       api<TestReport>("/security/tests").then(setReport),
       api<AuditEvent[]>(`/audit/events${filter ? `?decision=${filter}` : ""}`).then(setEvents),
+      api<UnauthorizedQuery[]>("/audit/unauthorized-queries").then(setUnauthorizedQueries),
     ])
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -250,6 +253,169 @@ export default function Security() {
         </div>
       </section>
 
+      {/* 4.5. Questions with No Authorized Source (Access Gap Discovery) */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-4 border-b border-line pb-3">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h2 className="display text-2xl font-semibold text-ink">
+                Questions with No Authorized Source ({unauthorizedQueries.length})
+              </h2>
+              {unauthorizedQueries.length > 0 && (
+                <span className="rounded-full bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-0.5 text-xs font-semibold">
+                  Access Gaps Identified
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted mt-0.5">
+              Queries submitted by colleagues where retrieval safely returned no authorized source (abstained).
+              Review these questions and assigned roles to identify missing document permissions or clearance gaps.
+            </p>
+          </div>
+        </div>
+
+        {loading ? (
+          <TableSkeleton rows={3} />
+        ) : unauthorizedQueries.length === 0 ? (
+          <div className="rounded-xl border border-line bg-surface p-8 text-center text-xs text-muted">
+            No query abstentions recorded. All questions asked by colleagues have had authorized sources available.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-xs">
+            <table className="w-full text-left text-sm hidden md:table">
+              <thead className="border-b border-line bg-surface-subtle/70 text-xs text-muted font-mono uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Question Asked</th>
+                  <th className="px-4 py-3 font-medium">Colleague & Assigned Roles</th>
+                  <th className="px-4 py-3 font-medium">Missing / Inaccessible Source</th>
+                  <th className="px-4 py-3 font-medium">Outcome</th>
+                  <th className="px-4 py-3 font-medium text-right">Timestamp</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {unauthorizedQueries.map((q) => (
+                  <tr
+                    key={q.id}
+                    onClick={() => {
+                      const matchedEvent = events.find((e) => e.id === q.id);
+                      if (matchedEvent) {
+                        setSelectedEvent(matchedEvent);
+                      } else {
+                        setSelectedEvent({
+                          id: q.id,
+                          time: q.time,
+                          user: q.user_name,
+                          user_email: q.user_email,
+                          roles: q.user_roles,
+                          question: q.question,
+                          actor: q.user_name,
+                          action: "chat.query",
+                          decision: q.decision,
+                          correlation_id: q.correlation_id,
+                          documents: [],
+                          suggested_resource: q.suggested_resource,
+                        });
+                      }
+                    }}
+                    className="cursor-pointer hover:bg-surface-hover/60 transition-colors group"
+                  >
+                    <td className="px-4 py-3.5 max-w-md">
+                      <p className="font-semibold text-ink text-sm leading-snug">
+                        "{q.question}"
+                      </p>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <p className="text-xs font-semibold text-ink">{q.user_name}</p>
+                      {q.user_email && <p className="text-[0.7rem] text-muted">{q.user_email}</p>}
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {q.user_roles && q.user_roles.length > 0 ? (
+                          q.user_roles.map((r) => (
+                            <span
+                              key={r}
+                              className="rounded bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 text-[0.65rem] font-mono font-medium"
+                            >
+                              {r}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[0.65rem] text-muted italic">No role assigned</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 text-xs">
+                      {q.suggested_resource ? (
+                        <div className="flex items-center gap-1.5 text-amber-700">
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          <span className="font-medium">{q.suggested_resource}</span>
+                        </div>
+                      ) : (
+                        <span className="text-muted italic text-[0.75rem]">
+                          No tenant document matched query
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <StatusPill status="abstained" />
+                    </td>
+                    <td className="px-4 py-3.5 text-right text-xs text-muted font-mono whitespace-nowrap">
+                      {new Date(q.time).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Mobile View */}
+            <div className="divide-y divide-line md:hidden">
+              {unauthorizedQueries.map((q) => (
+                <div
+                  key={q.id}
+                  onClick={() => {
+                    const matchedEvent = events.find((e) => e.id === q.id);
+                    if (matchedEvent) {
+                      setSelectedEvent(matchedEvent);
+                    } else {
+                      setSelectedEvent({
+                        id: q.id,
+                        time: q.time,
+                        user: q.user_name,
+                        user_email: q.user_email,
+                        roles: q.user_roles,
+                        question: q.question,
+                        actor: q.user_name,
+                        action: "chat.query",
+                        decision: q.decision,
+                        correlation_id: q.correlation_id,
+                        documents: [],
+                        suggested_resource: q.suggested_resource,
+                      });
+                    }
+                  }}
+                  className="p-4 space-y-2 cursor-pointer active:bg-surface-subtle"
+                >
+                  <p className="font-semibold text-ink text-sm">"{q.question}"</p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-ink font-medium">{q.user_name}</span>
+                    <StatusPill status="abstained" />
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {q.user_roles.map((r) => (
+                      <span key={r} className="rounded bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 text-[0.65rem] font-mono">
+                        {r}
+                      </span>
+                    ))}
+                  </div>
+                  {q.suggested_resource && (
+                    <p className="text-xs text-amber-700 font-medium">Missing: {q.suggested_resource}</p>
+                  )}
+                  <p className="text-[0.7rem] text-muted font-mono">{new Date(q.time).toLocaleTimeString()}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* 5. Activity Log (Audit Trail) */}
       <section className="space-y-4">
         <div className="flex flex-wrap items-baseline justify-between gap-4 border-b border-line pb-3">
@@ -325,10 +491,18 @@ export default function Security() {
                       {new Date(e.time).toLocaleTimeString()}
                     </td>
                     <td className="px-4 py-3 font-semibold text-ink text-xs sm:text-sm">
-                      {e.user}
+                      <p>{e.user}</p>
+                      {e.roles && e.roles.length > 0 && (
+                        <p className="text-[0.68rem] text-sky-700 font-normal">{e.roles.join(", ")}</p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-ink">
-                      {ACTIONS[e.action] ?? e.action}
+                      <span>{ACTIONS[e.action] ?? e.action}</span>
+                      {e.question && (
+                        <p className="text-[0.72rem] text-muted font-medium italic truncate max-w-xs mt-0.5">
+                          "{e.question}"
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <StatusPill status={e.decision} />
@@ -358,6 +532,9 @@ export default function Security() {
                     <div>
                       <p className="font-semibold text-ink text-sm">{e.user}</p>
                       <p className="text-xs text-muted">{ACTIONS[e.action] ?? e.action}</p>
+                      {e.question && (
+                        <p className="text-[0.72rem] text-muted italic line-clamp-1">"{e.question}"</p>
+                      )}
                     </div>
                     <StatusPill status={e.decision} />
                   </div>
@@ -381,11 +558,43 @@ export default function Security() {
       >
         {selectedEvent && (
           <div className="space-y-4 text-xs sm:text-sm">
+            {selectedEvent.question && (
+              <div className="py-2.5 px-3 bg-amber-500/10 border border-amber-500/25 rounded-xl space-y-1">
+                <span className="text-[0.7rem] uppercase font-mono tracking-wider text-amber-800 font-semibold block">
+                  Question Asked by Colleague:
+                </span>
+                <p className="text-ink font-semibold text-sm leading-snug">
+                  "{selectedEvent.question}"
+                </p>
+              </div>
+            )}
+
             <div className="rounded-xl border border-line bg-surface p-4 space-y-2.5">
               <div className="flex justify-between py-1 border-b border-line">
                 <span className="text-muted">Actor:</span>
                 <strong className="text-ink">{selectedEvent.actor || selectedEvent.user}</strong>
               </div>
+              {selectedEvent.user_email && (
+                <div className="flex justify-between py-1 border-b border-line">
+                  <span className="text-muted">User Email:</span>
+                  <span className="font-mono text-ink text-xs">{selectedEvent.user_email}</span>
+                </div>
+              )}
+              {selectedEvent.roles && selectedEvent.roles.length > 0 && (
+                <div className="flex justify-between py-1 border-b border-line">
+                  <span className="text-muted">Assigned Roles:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedEvent.roles.map((r) => (
+                      <span
+                        key={r}
+                        className="rounded bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 text-[0.65rem] font-mono uppercase"
+                      >
+                        {r}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex justify-between py-1 border-b border-line">
                 <span className="text-muted">Action Type:</span>
                 <span className="font-mono text-ink">{selectedEvent.action}</span>
@@ -394,6 +603,14 @@ export default function Security() {
                 <span className="text-muted">Decision Outcome:</span>
                 <StatusPill status={selectedEvent.decision} />
               </div>
+              {selectedEvent.suggested_resource && (
+                <div className="flex justify-between py-1 border-b border-line">
+                  <span className="text-muted">Missing / Inaccessible Source:</span>
+                  <span className="font-semibold text-amber-700 text-xs">
+                    {selectedEvent.suggested_resource}
+                  </span>
+                </div>
+              )}
               {selectedEvent.correlation_id && (
                 <div className="flex justify-between py-1 border-b border-line">
                   <span className="text-muted">Correlation ID:</span>
