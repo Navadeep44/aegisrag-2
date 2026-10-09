@@ -162,7 +162,12 @@ def answer_question(
             len(hits), val_res.entity_count, val_res.valid, val_res.reason
         )
 
-    answered = bool(result.get("answerable") and result.get("answer") and valid)
+    is_security_refusal = bool(
+        result.get("answer") and any(phrase in result.get("answer", "").lower() for phrase in [
+            "cannot fulfill requests to bypass", "access restriction", "security notice", "zero-trust"
+        ])
+    )
+    answered = bool(result.get("answerable") and result.get("answer") and (valid or is_security_refusal))
     by_id = {h.chunk.id: h for h in hits}
     citations = [
         {"chunk_id": cid, "document_id": by_id[cid].document.id,

@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     google_api_key: str = ""
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
 
     max_upload_mb: int = 20
     rate_limit_per_minute: int = 20
