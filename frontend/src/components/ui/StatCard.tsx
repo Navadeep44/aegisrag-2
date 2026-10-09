@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import { Counter } from "../motion/Counter";
 
 interface StatCardProps {
@@ -7,57 +8,45 @@ interface StatCardProps {
   total?: number;
   subtext?: string;
   badge?: ReactNode;
-  tone?: "default" | "emerald" | "amber" | "rose" | "sky";
+  tone?: "default" | "emerald" | "amber" | "rose" | "sky" | "violet";
   onClick?: () => void;
   className?: string;
+  icon?: LucideIcon;
 }
 
-export function StatCard({
-  label,
-  value,
-  total,
-  subtext,
-  badge,
-  tone = "default",
-  onClick,
-  className = "",
-}: StatCardProps) {
-  const isNumber = typeof value === "number";
+const tones = {
+  default: { text: "text-ink", icon: "text-accent bg-accent/10 border-accent/25", bar: "from-accent/60" },
+  sky: { text: "text-accent", icon: "text-accent bg-accent/10 border-accent/25", bar: "from-accent/60" },
+  emerald: { text: "text-allow", icon: "text-allow bg-allow/10 border-allow/25", bar: "from-allow/60" },
+  amber: { text: "text-warn", icon: "text-warn bg-warn/10 border-warn/25", bar: "from-warn/60" },
+  rose: { text: "text-deny", icon: "text-deny bg-deny/10 border-deny/25", bar: "from-deny/60" },
+  violet: { text: "text-ai", icon: "text-ai bg-ai/10 border-ai/25", bar: "from-ai/60" },
+};
 
-  const toneColorMap = {
-    default: "text-ink",
-    emerald: "text-emerald-700",
-    amber: "text-amber-700",
-    rose: "text-rose-700",
-    sky: "text-sky-700",
-  };
-
-  const isClickable = Boolean(onClick);
-
+export function StatCard({ label, value, total, subtext, badge, tone = "default", onClick, className = "", icon: Icon }: StatCardProps) {
+  const t = tones[tone];
   return (
     <div
       onClick={onClick}
-      className={`rounded-xl border border-line bg-surface p-5 shadow-xs transition-all duration-200 ${
-        isClickable ? "cursor-pointer hover:border-ink/40 hover:shadow-sm" : ""
-      } ${className}`}
+      className={`glass relative overflow-hidden rounded-2xl p-4 ${onClick ? "glass-hover cursor-pointer" : ""} ${className}`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted font-mono">{label}</p>
+      <div className={`pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r ${t.bar} to-transparent`} />
+      <div className="flex items-start justify-between gap-2">
+        {Icon ? (
+          <div className={`grid h-9 w-9 place-items-center rounded-xl border ${t.icon}`}>
+            <Icon className="h-4.5 w-4.5" strokeWidth={1.9} />
+          </div>
+        ) : <span />}
         {badge}
       </div>
-
-      <div className="mt-2 flex items-baseline gap-2">
-        <span className={`display text-3xl sm:text-4xl font-semibold ${toneColorMap[tone]}`}>
-          {isNumber ? <Counter value={value as number} /> : value}
+      <div className="mt-3 flex items-baseline gap-1.5">
+        <span className={`display text-3xl ${t.text}`}>
+          {typeof value === "number" ? <Counter value={value} /> : value}
         </span>
-        {total !== undefined && (
-          <span className="text-xs text-muted">
-            of <strong className="text-ink font-medium">{total}</strong> total
-          </span>
-        )}
+        {total !== undefined && <span className="text-xs text-muted">/ {total}</span>}
       </div>
-
-      {subtext && <p className="mt-1 text-xs text-muted leading-relaxed">{subtext}</p>}
+      <p className="mt-0.5 text-xs font-medium text-muted">{label}</p>
+      {subtext && <p className="mt-1 text-[11px] text-muted-light">{subtext}</p>}
     </div>
   );
 }

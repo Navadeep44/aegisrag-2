@@ -88,7 +88,7 @@ export default function Security() {
     try {
       const res = await api<TestReport>("/security/tests/run", { method: "POST" });
       setReport(res);
-      showToast("Security test suite executed: all regression tests verified.", "success");
+      showToast(`Suite finished: ${res.passed ?? 0} passed, ${res.failed ?? 0} failed.`, (res.failed ?? 0) ? "error" : "success");
     } catch (e) {
       showToast((e as Error).message, "error");
     } finally {
@@ -106,8 +106,8 @@ export default function Security() {
   }
 
   const securityTests = report?.tests.filter((t) => t.group === "security") ?? [];
-  const passCount = report?.passed ?? securityTests.filter((t) => t.outcome === "passed").length;
-  const totalTests = securityTests.length || 17;
+  const passCount = securityTests.filter((t) => t.outcome === "passed").length;
+  const totalTests = securityTests.length;
 
   const deniedCount = events.filter((e) => e.decision === "denied").length;
   const flaggedCount = events.filter((e) => e.decision === "flagged" || e.action.includes("injection")).length;
@@ -128,8 +128,10 @@ export default function Security() {
     <div className="space-y-8 pb-16">
       {/* 1. Page Header with Export Actions */}
       <PageHeader
-        title="Audit & Security"
-        subtitle="Automated security regression tests and tamper-evident activity telemetry across tenant workflows."
+        icon={ShieldCheck}
+        tone="allow"
+        title="Security & audit"
+        subtitle="Live attack tests and every access decision."
         action={
           <div className="flex items-center gap-2">
             <Button kind="secondary" onClick={() => exportAudit("csv")} className="flex items-center gap-1.5">
@@ -146,107 +148,37 @@ export default function Security() {
 
       {error && <Notice tone="error">{error}</Notice>}
 
-      {/* 2. Security Posture Scorecard Strip */}
-      <section aria-label="Security scorecard" className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-        <StatCard
-          label="Attack Suite Pass Rate"
-          value={`${passCount}/${totalTests}`}
-          subtext="17 automated regression checks"
-          tone="emerald"
-        />
-        <StatCard
-          label="Audit Log Integrity"
-          value="Immutable"
-          subtext="Tamper-evident append-only store"
-        />
-        <StatCard
-          label="Encryption Standard"
-          value="AES-256"
-          subtext="In-transit: TLS 1.3"
-        />
-        <StatCard
-          label="Access Enforcement"
-          value="SQL Gate"
-          subtext="Checks run before retrieval"
-          tone="emerald"
-        />
+      <section aria-label="Security scorecard" className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard icon={ShieldCheck} label="Attack & access tests passing" value={`${passCount}/${totalTests}`} tone="emerald" />
+        <StatCard icon={Lock} label="Denied requests (loaded)" value={deniedCount} tone="rose" />
+        <StatCard icon={AlertTriangle} label="Flagged (injection / bypass)" value={flaggedCount} tone="amber" />
+        <StatCard icon={History} label="Events in view" value={events.length} tone="sky" />
       </section>
 
-      {/* 3. Anomaly Oversight Notice */}
-      {(deniedCount > 0 || flaggedCount > 0) && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50/70 p-4 text-xs text-amber-900 shadow-xs">
+      <section className="glass rounded-2xl p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-200 text-amber-900">
-              <ShieldAlert className="h-4 w-4" />
-            </div>
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-allow-bg text-allow"><ShieldCheck className="h-5 w-5" /></span>
             <div>
-              <p className="font-semibold text-sm">
-                Security Activity Oversight: {deniedCount} Denials • {flaggedCount} Flagged Events Recorded
-              </p>
-              <p className="text-amber-800 mt-0.5">
-                Pre-retrieval SQL authorization blocked unauthorized context access without exposing document text.
-              </p>
+              <h2 className="display text-lg text-ink">Live attack suite</h2>
+              {report?.ran_at && <p className="font-mono text-[11px] text-muted">last run {new Date(report.ran_at).toLocaleString()}</p>}
             </div>
           </div>
-
-          <Button kind="secondary" onClick={() => setFilter("denied")}>
-            Filter Denials ({deniedCount})
-          </Button>
-        </div>
-      )}
-
-      {/* 4. Automated Security Suite Card */}
-      <section className="rounded-xl border border-line bg-surface p-6 shadow-xs space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-4">
-          <div>
-            <h2 className="display text-2xl font-semibold text-ink">
-              Automated Security & Regression Checks
-            </h2>
-            <p className="text-xs text-muted mt-0.5">
-              17 security tests verifying tenant database isolation, prompt injection containment, SQL pre-filtering, and immediate revocation.
-            </p>
-          </div>
-
           {canRunTests && (
-            <Button
-              kind="primary"
-              onClick={runSecuritySuite}
-              disabled={running}
-              className="flex items-center gap-2"
-            >
-              <Play className="h-4 w-4" />
-              <span>{running ? "Running security checks…" : "Run security checks"}</span>
+            <Button onClick={runSecuritySuite} disabled={running}>
+              <Play className="h-4 w-4" /> {running ? "Running…" : "Run now"}
             </Button>
           )}
         </div>
-
-        {report?.ran_at && (
-          <div className="flex items-center justify-between text-xs text-muted font-mono">
-            <span>Last ran {new Date(report.ran_at).toLocaleTimeString()}:</span>
-            <span className="font-semibold text-allow">{report.passed} checks passed</span>
-          </div>
-        )}
-
-        <div className="divide-y divide-line">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {securityTests.map((t, i) => {
-            const isPass = t.outcome === "passed";
+            const ok = t.outcome === "passed";
             return (
-              <motion.div
-                key={t.id + (report?.ran_at || "")}
-                initial={{ opacity: 0, x: -6 }}
-                animate={{ opacity: 1, x: 0 }}
+              <motion.div key={t.id + (report?.ran_at || "")} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.02 * i }}
-                className="flex items-center justify-between py-2.5 text-xs sm:text-sm"
-              >
-                <div className="flex items-center gap-2.5">
-                  {isPass ? (
-                    <CheckCircle2 className="h-4 w-4 text-allow shrink-0" />
-                  ) : (
-                    <XCircle className="h-4 w-4 text-deny shrink-0" />
-                  )}
-                  <span className="text-ink font-medium">{t.title}</span>
-                </div>
-                <StatusPill status={isPass ? "pass" : "failed"} />
+                className={`flex items-start gap-2.5 rounded-xl border p-3 ${ok ? "border-allow-border bg-allow-bg/60" : "border-deny-border bg-deny-bg"}`}>
+                {ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-allow" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-deny" />}
+                <span className="text-xs font-semibold leading-snug text-ink">{t.title}</span>
               </motion.div>
             );
           })}
@@ -424,7 +356,7 @@ export default function Security() {
               Activity Log ({events.length})
             </h2>
             <p className="text-xs text-muted">
-              Tamper-evident audit trail capturing actors, decisions, and correlation IDs without storing private document text.
+              Ids and decisions only — never question or document text.
             </p>
           </div>
         </div>
@@ -438,7 +370,7 @@ export default function Security() {
                 onClick={() => setFilter(value)}
                 className={`rounded-full px-3 py-1 transition-colors ${
                   filter === value
-                    ? "bg-ink font-medium text-white shadow-xs"
+                    ? "bg-accent font-medium text-white shadow-xs"
                     : "border border-line bg-surface text-muted hover:text-ink"
                 }`}
               >

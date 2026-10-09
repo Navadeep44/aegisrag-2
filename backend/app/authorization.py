@@ -8,13 +8,15 @@ belongs to the user's tenant, and either:
 
 Admin, owner, platform admin, auditor, and uploader do not gain content
 access implicitly.
-Every query that touches documents or chunks must go through readable_clause().
+Every query that touches documents goes through readable_clause(); every query
+that touches chunks or records goes through readable_chunk_clause(), which adds
+the row/section-level rule on top.
 """
 from datetime import datetime, timezone
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import LEVELS, Document, DocumentAccess, User, now
+from app.models import LEVELS, Chunk, ChunkAccess, Document, DocumentAccess, User, now
 
 
 def readable_clause(user: User):
@@ -51,6 +53,27 @@ def readable_clause(user: User):
         Document.status == "active",
         or_(individual, and_(broad, Document.classification <= user.clearance)),
     )
+
+
+def chunk_rule_clause(user: User):
+    """Row/section-level rule. A chunk with no ChunkAccess rows is visible to
+    anyone who can read its document; otherwise one row must match the user.
+    Applies to admins too: administering access is not reading content."""
+    subjects = [and_(ChunkAccess.subject_type == "user", ChunkAccess.subject_id == user.id)]
+    role_keys = [r.id for r in user.roles]
+    if role_keys:
+        subjects.append(and_(ChunkAccess.subject_type == "role", ChunkAccess.subject_id.in_(role_keys)))
+    if user.department_id:
+        subjects.append(and_(ChunkAccess.subject_type == "department",
+                             ChunkAccess.subject_id == user.department_id))
+    restricted = exists().where(ChunkAccess.chunk_id == Chunk.id)
+    matched = exists().where(ChunkAccess.chunk_id == Chunk.id, or_(*subjects))
+    return or_(~restricted, matched)
+
+
+def readable_chunk_clause(user: User):
+    """Use with a query that joins Chunk to Document."""
+    return and_(readable_clause(user), Chunk.tenant_id == user.tenant_id, chunk_rule_clause(user))
 
 
 def can_read(db: Session, user: User, document_id: str) -> bool:

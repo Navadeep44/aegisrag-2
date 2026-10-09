@@ -13,6 +13,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
+import { KeyRound as KeyRoundIcon } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { StatCard } from "../components/ui/StatCard";
 import { TableSkeleton } from "../components/ui/Skeleton";
@@ -201,8 +202,9 @@ export default function AccessRequests() {
     <div className="space-y-8 pb-16">
       {/* 1. Page Header with single Request Action */}
       <PageHeader
+        icon={KeyRoundIcon}
         title="Access Approvals"
-        subtitle="Request access to confidential collections or review permission escalation requests."
+        subtitle="Ask for access, or decide requests."
         action={
           <Button
             kind="primary"

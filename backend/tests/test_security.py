@@ -52,12 +52,13 @@ def set_grants(client, headers, document_id, grants):
 
 def test_access_matrix(client, db):
     """Every user can read exactly the documents their roles and clearance allow"""
+    shared = {"Leave Policy", "IT Onboarding Notes", "Visitor Policy Notice (photo)", "Expense Claims 2025"}
     expected = {
-        ADMIN: {"Leave Policy", "IT Onboarding Notes"},
-        HR: {"Leave Policy", "IT Onboarding Notes", "Salary Bands 2026"},
-        FINANCE: {"Leave Policy", "IT Onboarding Notes", "FY2025 Revenue Report", "Scanned Vendor Invoice"},
-        ENGINEER: {"Leave Policy", "IT Onboarding Notes", "Platform Architecture Overview"},
-        EMPLOYEE: {"Leave Policy", "IT Onboarding Notes"},
+        ADMIN: shared,
+        HR: shared | {"Salary Bands 2026"},
+        FINANCE: shared | {"FY2025 Revenue Report", "Scanned Vendor Invoice"},
+        ENGINEER: shared | {"Platform Architecture Overview", "Engineering Roadmap Whiteboard (photo)"},
+        EMPLOYEE: shared,
         GLOBEX: {"Globex Price List"},
     }
     titles = dict(db.execute(select(Document.id, Document.title)).all())

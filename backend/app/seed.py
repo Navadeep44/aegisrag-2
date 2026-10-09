@@ -48,7 +48,17 @@ ACME_DOCS = [
     ("architecture_overview.pdf", "Platform Architecture Overview", 2, ["engineering", "executive"]),
     ("scanned_invoice.pdf", "Scanned Vendor Invoice", 2, ["finance"]),
     ("salary_bands_2026.xlsx", "Salary Bands 2026", 3, ["hr"]),
+    ("visitor_policy_notice.png", "Visitor Policy Notice (photo)", 1, ["*"]),
+    ("roadmap_whiteboard.png", "Engineering Roadmap Whiteboard (photo)", 2, ["engineering", "executive"]),
+    ("expense_claims_2025.csv", "Expense Claims 2025", 1, ["*"]),
 ]
+
+# Row-level rules for structured records: each row is visible to its own
+# department; finance and executives see every row.
+ROW_POLICIES = {
+    "Expense Claims 2025": {"column": "Department", "subject_type": "department",
+                            "full_access_roles": ["finance", "executive"]},
+}
 
 
 def _add_document(
@@ -60,6 +70,7 @@ def _add_document(
     title: str,
     level: int,
     granted: list[str],
+    row_policy: dict | None = None,
 ) -> Document:
     data = path.read_bytes()
     grants = [
@@ -79,6 +90,7 @@ def _add_document(
         checksum=checksum,
         version=1,
         access=grants,
+        row_policy=row_policy,
     )
     db.add(doc)
     db.commit()
@@ -216,7 +228,8 @@ def seed(db: Session) -> None:
 
     admin = users["admin@acme.test"]
     for filename, title, level, granted in ACME_DOCS:
-        _add_document(db, acme, admin, acme_roles, files[filename], title, level, granted)
+        _add_document(db, acme, admin, acme_roles, files[filename], title, level, granted,
+                      row_policy=ROW_POLICIES.get(title))
     _add_document(
         db,
         globex,
@@ -227,6 +240,25 @@ def seed(db: Session) -> None:
         1,
         ["*"],
     )
+
+
+def add_missing_demo_docs(db: Session) -> list[str]:
+    """Adds demo documents introduced after a database was seeded, without
+    touching anything else (used when upgrading an existing demo database)."""
+    acme = db.execute(select(Tenant).where(Tenant.slug == "acme")).scalar_one_or_none()
+    if not acme:
+        return []
+    admin = db.execute(select(User).where(User.email == "admin@acme.test")).scalar_one_or_none()
+    roles = {r.name: r for r in db.execute(select(Role).where(Role.tenant_id == acme.id)).scalars()}
+    have = set(db.execute(select(Document.title).where(Document.tenant_id == acme.id)).scalars())
+    missing = [d for d in ACME_DOCS if d[1] not in have]
+    if not admin or not missing:
+        return []
+    files = demo_docs.generate(Path(tempfile.mkdtemp(prefix="aegis_demo_")))
+    for filename, title, level, granted in missing:
+        _add_document(db, acme, admin, roles, files[filename], title, level, granted,
+                      row_policy=ROW_POLICIES.get(title))
+    return [m[1] for m in missing]
 
 
 def seed_if_empty(db: Session) -> None:

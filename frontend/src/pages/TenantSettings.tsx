@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Building2, CreditCard, ShieldCheck } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { PageHeader } from "../components/ui/PageHeader";
+import { Settings as SettingsIcon } from "lucide-react";
 import { SectionCard } from "../components/ui/SectionCard";
 import { StatCard } from "../components/ui/StatCard";
 import { StatusPill, RolePill } from "../components/ui/StatusPill";
@@ -277,8 +278,9 @@ export default function TenantSettings() {
   return (
     <div className="space-y-8 pb-12">
       <PageHeader
+        icon={SettingsIcon}
         title="Organization Settings"
-        subtitle="Manage your organization profile, ingestion quotas, subscription billing, and administrator designations."
+        subtitle="Profile, quotas, billing and admins."
       />
 
       {/* Tabs */}

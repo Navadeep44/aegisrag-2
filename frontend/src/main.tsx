@@ -1,5 +1,6 @@
-import "@fontsource/instrument-serif/400.css";
-import "@fontsource-variable/hanken-grotesk";
+import "@fontsource-variable/space-grotesk";
+import "@fontsource-variable/manrope";
+import "@fontsource-variable/jetbrains-mono";
 import "./styles/index.css";
 
 import React from "react";

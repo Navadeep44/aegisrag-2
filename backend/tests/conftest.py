@@ -81,7 +81,7 @@ def pytest_collection_modifyitems(items):
 def pytest_runtest_logreport(report):
     if report.when == "call" or (report.when == "setup" and report.outcome != "passed"):
         _results.append({"id": report.nodeid, "title": _titles.get(report.nodeid, report.nodeid),
-                         "group": "security" if "test_security" in report.nodeid else "unit",
+                         "group": "security" if ("test_security" in report.nodeid or "test_row_level" in report.nodeid) else "unit",
                          "outcome": report.outcome, "seconds": round(report.duration, 2)})
 
 

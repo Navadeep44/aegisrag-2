@@ -36,6 +36,8 @@ import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { ClearancePill, StatusPill } from "../components/ui/StatusPill";
 import { AccessEditor } from "../features/documents/AccessEditor";
 import { UploadForm } from "../features/documents/UploadForm";
+import { RowPolicyEditor } from "../features/documents/RowPolicyEditor";
+import { kindStyle } from "../lib/kinds";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { api, imageUrl, post } from "../lib/api";
@@ -52,6 +54,8 @@ type ScoreboardData = {
   health_score: number;
   ready_to_search_percentage: number;
 };
+
+const LEVEL_EDGE = ["border-l-level-0", "border-l-level-1", "border-l-level-2", "border-l-level-3"];
 
 export default function Documents() {
   const { user } = useAuth();
@@ -373,32 +377,11 @@ export default function Documents() {
   const flaggedCount = (docs || []).filter((d) => d.flagged || d.status === "flagged").length;
 
   return (
-    <div className="space-y-8 pb-16">
-      {/* 1. Page Header with clean count and single Upload Action */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl sm:text-3xl font-bold text-ink tracking-tight">Documents</h1>
-            <span className="rounded-full bg-surface-subtle px-2.5 py-0.5 text-xs font-medium text-muted border border-line">
-              {docs?.length ?? 0} total
-            </span>
-          </div>
-          <p className="mt-1 text-xs sm:text-sm text-muted">
-            Searchable organization documents and role permissions
-          </p>
-        </div>
-
-        {canUpload && (
-          <Button
-            kind="primary"
-            onClick={() => setUploadDrawerOpen(true)}
-            className="flex items-center gap-2"
-          >
-            <Upload className="h-4 w-4" />
-            <span>Upload Documents</span>
-          </Button>
-        )}
-      </div>
+    <div className="space-y-5 pb-16">
+      <PageHeader icon={FileText} title="Documents" subtitle="Everything indexed, with who can read it."
+        action={canUpload && (
+          <Button onClick={() => setUploadDrawerOpen(true)}><Upload className="h-4 w-4" /> Upload</Button>
+        )} />
 
       {error && <Notice tone="error">{error}</Notice>}
 
@@ -440,193 +423,64 @@ export default function Documents() {
         )}
       </section>
 
-      {/* 3. Sticky Filter & Search Toolbar */}
-      <div className="sticky top-0 z-10 -mx-4 sm:-mx-8 lg:-mx-12 px-4 sm:px-8 lg:px-12 py-3 bg-page/95 backdrop-blur-md border-b border-line">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Segmented Filter Pills */}
-          <div className="flex flex-wrap gap-1.5 text-xs">
-            <button
-              onClick={() => setActiveFilterTab("all")}
-              className={`rounded-full px-3 py-1.5 transition-colors ${
-                activeFilterTab === "all"
-                  ? "bg-ink font-medium text-white shadow-xs"
-                  : "border border-line bg-surface text-muted hover:text-ink"
-              }`}
-            >
-              All ({docs?.length ?? 0})
+      {/* 3. Filter & Search Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          {([
+            ["all", `All · ${docs?.length ?? 0}`, true],
+            ["active", `Active · ${activeCount}`, true],
+            ["processing", `Processing · ${processingCount}`, processingCount > 0],
+            ["flagged", `Flagged · ${flaggedDocs.length || flaggedCount}`, flaggedDocs.length > 0 || flaggedCount > 0],
+            ["dept", "Readable by me", Boolean(isDeptLead)],
+          ] as [string, string, boolean][]).filter((f) => f[2]).map(([id, label]) => (
+            <button key={id} onClick={() => setActiveFilterTab(id)}
+              className={`rounded-full border px-3 py-1.5 font-semibold transition-colors ${
+                activeFilterTab === id ? "border-accent bg-accent text-white" : "border-line bg-surface text-muted hover:text-ink"}`}>
+              {label}
             </button>
-            <button
-              onClick={() => setActiveFilterTab("active")}
-              className={`rounded-full px-3 py-1.5 transition-colors ${
-                activeFilterTab === "active"
-                  ? "bg-ink font-medium text-white shadow-xs"
-                  : "border border-line bg-surface text-muted hover:text-ink"
-              }`}
-            >
-              Active ({activeCount})
-            </button>
-            {processingCount > 0 && (
-              <button
-                onClick={() => setActiveFilterTab("processing")}
-                className={`rounded-full px-3 py-1.5 transition-colors ${
-                  activeFilterTab === "processing"
-                    ? "bg-sky-700 font-medium text-white shadow-xs"
-                    : "border border-line bg-surface text-muted hover:text-sky-700"
-                }`}
-              >
-                Processing ({processingCount})
-              </button>
-            )}
-            {(flaggedDocs.length > 0 || flaggedCount > 0) && (
-              <button
-                onClick={() => setActiveFilterTab("flagged")}
-                className={`rounded-full px-3 py-1.5 transition-colors ${
-                  activeFilterTab === "flagged"
-                    ? "bg-amber-700 font-medium text-white shadow-xs"
-                    : "border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
-                }`}
-              >
-                Flagged ({flaggedDocs.length || flaggedCount})
-              </button>
-            )}
-            {isDeptLead && (
-              <button
-                onClick={() => setActiveFilterTab("dept")}
-                className={`rounded-full px-3 py-1.5 transition-colors ${
-                  activeFilterTab === "dept"
-                    ? "bg-ink font-medium text-white shadow-xs"
-                    : "border border-line bg-surface text-muted hover:text-ink"
-                }`}
-              >
-                My Department
-              </button>
-            )}
-          </div>
-
-          {/* Search input */}
-          <div className="w-full sm:w-64">
-            <div className="relative">
-              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted" />
-              <input
-                type="text"
-                placeholder="Filter documents…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-lg border border-line bg-surface pl-8 pr-3 py-1.5 text-xs text-ink placeholder:text-muted focus:border-ink focus:outline-none"
-              />
-            </div>
-          </div>
+          ))}
+        </div>
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted" />
+          <input type="text" placeholder="Filter…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-xl border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink placeholder:text-muted-light focus:border-accent/50 focus:outline-none" />
         </div>
       </div>
 
-      {/* 4. Compact Document List Table */}
       {docs === null ? (
         <TableSkeleton rows={6} />
       ) : filteredDocs.length === 0 ? (
-        <div className="rounded-xl border border-line bg-surface p-12 text-center space-y-3">
-          <FileText className="mx-auto h-8 w-8 text-muted" />
-          <h3 className="display text-xl font-semibold text-ink">No documents found</h3>
-          <p className="text-xs text-muted max-w-sm mx-auto">
-            {searchQuery
-              ? "No documents match your search query."
-              : "No documents match the selected filter."}
-          </p>
-          {canUpload && (
-            <Button onClick={() => setUploadDrawerOpen(true)} kind="primary" className="mt-2">
-              Upload first document
-            </Button>
-          )}
+        <div className="glass rounded-2xl p-12 text-center">
+          <FileText className="mx-auto h-10 w-10 text-muted-light" />
+          <p className="mt-2 text-sm text-muted">No documents here.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-xs">
-          <table className="w-full text-left text-sm hidden md:table">
-            <thead className="border-b border-line bg-surface-subtle/70 text-xs text-muted font-mono uppercase tracking-wider">
-              <tr>
-                <th className="px-4 py-3 font-medium">Document Title</th>
-                <th className="px-4 py-3 font-medium">Clearance</th>
-                <th className="px-4 py-3 font-medium">Shared With</th>
-                <th className="px-4 py-3 font-medium">Pages</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {filteredDocs.map((doc) => (
-                <tr
-                  key={doc.id}
-                  onClick={() => {
-                    setSelectedDoc(doc);
-                    setDocDrawerTab("access");
-                    setPreviewPage(1);
-                  }}
-                  className="cursor-pointer hover:bg-surface-hover/70 transition-colors group"
-                >
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-ink font-mono text-[0.65rem] uppercase font-bold border border-line">
-                        {doc.kind}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-ink text-sm group-hover:text-accent truncate">
-                          {doc.title}
-                        </p>
-                        <p className="text-[0.7rem] text-muted font-mono truncate">{doc.filename}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <ClearancePill clearance={doc.classification} label={doc.classification_label} />
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span className="text-xs text-ink/90 font-medium">
-                      {getSharedWithSummary(doc)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5 text-xs text-muted font-mono">
-                    <p>{doc.page_count > 0 ? `${doc.page_count} page${doc.page_count > 1 ? "s" : ""}` : "0 pages"}</p>
-                    {typeof doc.chunk_count === "number" && (
-                      <p className="text-[0.68rem] text-muted">{doc.chunk_count} chunk{doc.chunk_count === 1 ? "" : "s"}</p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <StatusPill status={doc.status} />
-                  </td>
-                  <td className="px-4 py-3.5 text-right">
-                    <span className="text-xs text-accent underline underline-offset-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      Inspect →
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Mobile Stacked Card View (<768px) */}
-          <div className="divide-y divide-line md:hidden">
-            {filteredDocs.map((doc) => (
-              <div
-                key={doc.id}
-                onClick={() => {
-                  setSelectedDoc(doc);
-                  setDocDrawerTab("access");
-                  setPreviewPage(1);
-                }}
-                className="p-4 space-y-2 cursor-pointer active:bg-surface-subtle"
-              >
-                <div className="flex items-start justify-between gap-2">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {filteredDocs.map((doc, i) => {
+            const k = kindStyle(doc.kind, doc.note);
+            const KIcon = k.icon;
+            return (
+              <motion.button key={doc.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 12) * 0.03 }}
+                onClick={() => { setSelectedDoc(doc); setDocDrawerTab("access"); setPreviewPage(1); }}
+                className={`glass glass-hover group relative overflow-hidden rounded-2xl border-l-4 p-4 text-left ${LEVEL_EDGE[doc.classification] ?? ""}`}>
+                <div className="flex items-start gap-3">
+                  <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border ${k.tint}`}><KIcon className="h-5 w-5" /></span>
                   <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-ink text-sm">{doc.title}</h3>
-                    <p className="text-[0.7rem] text-muted font-mono">{doc.filename}</p>
+                    <p className="truncate font-semibold text-ink group-hover:text-accent">{doc.title}</p>
+                    <p className="truncate text-[11px] text-muted">{k.label} · {doc.page_count || 1} {doc.kind === "database" ? "table" : "page"}{doc.page_count > 1 ? "s" : ""}</p>
                   </div>
-                  <StatusPill status={doc.status} />
+                  {doc.readable ? <Eye className="h-4 w-4 text-allow" aria-label="You can read this" /> : <Shield className="h-4 w-4 text-muted-light" aria-label="You manage but cannot read this" />}
                 </div>
-                <div className="flex items-center justify-between text-xs text-muted pt-1">
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
                   <ClearancePill clearance={doc.classification} label={doc.classification_label} />
-                  <span className="font-mono text-[0.7rem]">{doc.page_count} page(s)</span>
+                  {doc.status !== "active" && <StatusPill status={doc.status} />}
+                  {doc.flagged && <span className="chip text-warn"><AlertTriangle className="h-3 w-3" /> injection removed</span>}
+                  {doc.row_policy?.column && <span className="chip text-emerald-700"><Layers className="h-3 w-3" /> row rules</span>}
+                  {canManage && <span className="chip max-w-[160px] truncate"><UserPlus className="h-3 w-3" /> {getSharedWithSummary(doc)}</span>}
                 </div>
-              </div>
-            ))}
-          </div>
+              </motion.button>
+            );
+          })}
         </div>
       )}
 
@@ -743,6 +597,9 @@ export default function Documents() {
             {/* TAB 2: Extracted Headings / Database Schema */}
             {docDrawerTab === "sections" && (
               <div className="space-y-4">
+                {(selectedDoc.kind === "database" || selectedDoc.kind === "xlsx") && (canManageGrants || isDocManager) && (
+                  <RowPolicyEditor key={selectedDoc.id} doc={selectedDoc} roles={roles} onSaved={load} />
+                )}
                 {selectedDoc.kind === "database" ? (
                   <div className="space-y-4">
                     <div className="rounded-xl border border-line bg-surface p-4 space-y-3">

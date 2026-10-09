@@ -8,10 +8,10 @@ import openpyxl
 import pymupdf
 from sqlalchemy import select
 
-from app import ai, audit, page_renderer
+from app import ai, audit, llm, ocr, page_renderer, row_security
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Chunk, Document, IngestionJob, now
+from app.models import Chunk, Document, IngestionJob, Record, now
 
 MAGIC = {
     ".pdf": ("pdf", b"%PDF"),
@@ -146,6 +146,7 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
     from collections import Counter
 
     sections, sections_meta, unread = [], [], 0
+    ocr_pages: list[tuple[int, str]] = []
     with pymupdf.open(path) as pdf:
         # Check PDF outline / table of contents
         toc = pdf.get_toc()  # [[lvl, title, page], ...]
@@ -179,12 +180,25 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
             page_image_path(doc, number).write_bytes(png)
             raw_page_text = page.get_text().strip()
 
-            has_visuals = bool(page.get_images()) or len(page.get_drawings()) > 8
+            # A chart or diagram: embedded images, or vector drawings that are not just table rules.
+            try:
+                has_table = bool(page.find_tables().tables)
+            except Exception:
+                has_table = False
+            has_visuals = bool(page.get_images()) or (len(page.get_drawings()) >= 3 and not has_table)
             visual_desc = ""
-            if len(raw_page_text) < 40 or has_visuals:
-                seen = ai.describe_image(png).strip()
-                if seen:
-                    visual_desc = seen
+            if len(raw_page_text) < 40:
+                # Scanned page: OCR it (vision model first, offline engine second).
+                hi_res = page.get_pixmap(dpi=200).tobytes("png")
+                visual_desc, engine = ocr.read_image(hi_res)
+                if visual_desc:
+                    ocr_pages.append((number, engine))
+            elif has_visuals and llm.enabled():
+                # Text page with a chart, diagram or embedded image: describe the visual.
+                try:
+                    visual_desc = llm.transcribe_image(png)
+                except Exception:
+                    visual_desc = ""
 
             if not raw_page_text and not visual_desc:
                 unread += 1
@@ -336,8 +350,9 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
 
             # If there was visual OCR content on this page
             if visual_desc:
-                vis_content = f"[Visual Content on Page {number}]\n{visual_desc}"
-                sections.append((number, f"page {number}", normalize_text(vis_content), current_heading))
+                label = "OCR" if any(n == number for n, _ in ocr_pages) else "visual"
+                vis_content = f"[{'Scanned page text' if label == 'OCR' else 'Visual content'} on page {number}]\n{visual_desc}"
+                sections.append((number, f"page {number} · {label}", normalize_text(vis_content), current_heading))
 
     if not sections_meta and sections:
         sections_meta.append({
@@ -352,7 +367,39 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
     return sections, sections_meta, unread
 
 
-def _extract_database(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, str]], list[dict], dict]:
+MAX_ROWS = 5000
+
+
+def _as_number(value) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    text = str(value or "").strip().replace(",", "").replace("$", "").replace("%", "")
+    try:
+        return float(text) if text else None
+    except ValueError:
+        return None
+
+
+def column_types(columns: list[str], rows: list[dict]) -> dict[str, str]:
+    types = {}
+    for col in columns:
+        values = [r.get(col) for r in rows if str(r.get(col, "")).strip()]
+        numeric = sum(_as_number(v) is not None for v in values)
+        types[col] = "number" if values and numeric / len(values) >= 0.8 else "text"
+    return types
+
+
+def table_overview(name: str, columns: list[str]) -> str:
+    return (f"Structured table '{name}'. Each row is one record. "
+            f"Columns: {', '.join(columns)}.")
+
+
+def row_text(index: int, row: dict) -> str:
+    pairs = "; ".join(f"{k}: {v}" for k, v in row.items() if str(v).strip())
+    return f"Record #{index}: {pairs}."
+
+
+def _extract_database(doc: Document, path: Path):
     """Parses structured database records (CSV, TSV, JSON, SQL)."""
     import csv
     import json
@@ -434,58 +481,47 @@ def _extract_database(doc: Document, path: Path) -> tuple[list[tuple[int, str, s
         "Internal",
     )
 
-    batch_size = 5
-    total_batches = max(1, (len(rows_data) + batch_size - 1) // batch_size)
-    for b_idx in range(total_batches):
-        chunk_rows = rows_data[b_idx * batch_size : (b_idx + 1) * batch_size]
-        lines = [f"Database Table: {table_title} (Records {b_idx * batch_size + 1}-{b_idx * batch_size + len(chunk_rows)})"]
-        for r_idx, r in enumerate(chunk_rows, start=b_idx * batch_size + 1):
-            pairs = "; ".join(f"{k}: {v}" for k, v in r.items() if str(v).strip())
-            lines.append(f"Record #{r_idx}: {pairs}.")
-        content = "\n".join(lines)
-        loc = f"records {b_idx * batch_size + 1}-{b_idx * batch_size + len(chunk_rows)}"
-        heading = f"{table_title} (Records {b_idx * batch_size + 1}-{b_idx * batch_size + len(chunk_rows)})"
-        sections.append((1, loc, content, heading))
-
-    return sections, sections_meta, schema
+    schema["column_types"] = column_types(columns, rows_data)
+    sections.append((1, "table schema", table_overview(table_title, columns), f"Database Table: {table_title}"))
+    tables = [{"sheet": table_title, "heading": f"Database Table: {table_title}",
+               "columns": columns, "rows": rows_data[:MAX_ROWS]}]
+    return sections, sections_meta, schema, tables
 
 
 def _extract_image(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, str]], list[dict], int]:
-    png = pymupdf.Pixmap(str(path)).tobytes("png")
+    pix = pymupdf.Pixmap(str(path))
+    if pix.alpha or pix.n > 3:
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+    png = pix.tobytes("png")
     page_image_path(doc, 1).write_bytes(png)
-    text = ai.describe_image(png).strip()
+    text, engine = ocr.read_image(png)
     sec_meta = [{"id": "sec_1", "heading": "Image Content", "level": 1, "page": 1, "snippet": text[:150], "allowed_roles": []}]
-    return ([(1, "image", text, "Image Content")], sec_meta, 0) if text else ([], sec_meta, 1)
+    if not text:
+        return [], sec_meta, 1
+    return [(1, f"image · OCR ({engine})", f"[Text read from image]\n{text}", "Image Content")], sec_meta, 0
 
 
-def _extract_xlsx(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, str]], list[dict], int]:
-    """Each row becomes 'Header: value; ...' so a cell never loses its column name."""
-    sections, sec_meta = [], []
+def _extract_xlsx(doc: Document, path: Path):
+    """Every sheet becomes a table; every row becomes its own record and chunk,
+    so a cell never loses its column name and rows can carry their own access."""
+    sections, sec_meta, tables = [], [], []
     book = openpyxl.load_workbook(io.BytesIO(path.read_bytes()), data_only=True, read_only=True)
     for index, sheet in enumerate(book.worksheets, start=1):
         page_renderer.render_document_page(doc, index, path, page_image_path(doc, index))
         rows = [r for r in sheet.iter_rows(values_only=True) if any(c is not None for c in r)]
         if not rows:
             continue
-        header = [str(c) if c is not None else f"Column {i + 1}" for i, c in enumerate(rows[0])]
+        header = [str(c).strip() if c is not None else f"Column {i + 1}" for i, c in enumerate(rows[0])]
         sheet_heading = f"Spreadsheet Sheet: {sheet.title}"
         sec_meta.append({
-            "id": f"sec_sheet_{index}",
-            "heading": sheet_heading,
-            "level": 1,
-            "page": index,
-            "snippet": f"Sheet {sheet.title} • {len(rows)} rows",
-            "allowed_roles": [],
+            "id": f"sec_sheet_{index}", "heading": sheet_heading, "level": 1, "page": index,
+            "snippet": f"Sheet {sheet.title} • {len(rows) - 1} rows", "allowed_roles": [],
         })
-        for start in range(1, len(rows), 25):
-            block = rows[start : start + 25]
-            lines = [f"Sheet: {sheet.title}"]
-            for row in block:
-                cells = [f"{h}: {c}" for h, c in zip(header, row) if c is not None]
-                lines.append("; ".join(cells) + ".")
-            location = f"sheet {sheet.title}, rows {start + 1}-{start + len(block)}"
-            sections.append((index, location, "\n".join(lines), sheet_heading))
-    return sections, sec_meta, 0
+        records = [{h: ("" if c is None else c) for h, c in zip(header, row)} for row in rows[1:MAX_ROWS + 1]]
+        sections.append((index, f"sheet {sheet.title}", table_overview(sheet.title, header), sheet_heading))
+        tables.append({"sheet": sheet.title, "heading": sheet_heading, "columns": header,
+                       "rows": records, "page": index})
+    return sections, sec_meta, tables
 
 
 def _extract_docx(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, str]], list[dict], int]:
@@ -615,19 +651,29 @@ def process_document(document_id: str) -> None:
             return
         create_or_update_job(db, doc, status="processing", stage="validation")
         path = doc_dir(doc) / ("original" + Path(doc.filename).suffix.lower())
+        (doc_dir(doc) / "pages").mkdir(parents=True, exist_ok=True)
         try:
             create_or_update_job(db, doc, status="processing", stage="extraction")
-            sections_meta = []
+            sections_meta, tables = [], []
             if doc.kind == "pdf":
                 sections, sections_meta, unread = _extract_pdf(doc, path)
             elif doc.kind == "database":
-                sections, sections_meta, schema = _extract_database(doc, path)
+                sections, sections_meta, schema, tables = _extract_database(doc, path)
                 doc.data_schema = schema
                 unread = 0
             elif doc.kind == "image":
                 sections, sections_meta, unread = _extract_image(doc, path)
             elif doc.kind == "xlsx":
-                sections, sections_meta, unread = _extract_xlsx(doc, path)
+                sections, sections_meta, tables = _extract_xlsx(doc, path)
+                unread = 0
+                first = tables[0] if tables else {"columns": [], "rows": []}
+                doc.data_schema = {
+                    "table_name": first.get("sheet", doc.title), "columns": first["columns"],
+                    "row_count": sum(len(t["rows"]) for t in tables),
+                    "primary_key": first["columns"][0] if first["columns"] else "id",
+                    "column_types": column_types(first["columns"], first["rows"]),
+                    "sheets": [{"name": t["sheet"], "columns": t["columns"], "row_count": len(t["rows"])} for t in tables],
+                }
             elif doc.kind == "docx":
                 sections, sections_meta, unread = _extract_docx(doc, path)
             else:
@@ -649,33 +695,43 @@ def process_document(document_id: str) -> None:
                     enriched_text = breadcrumb + clean
                     pieces.append((page, location, enriched_text, heading))
 
+            # Structured rows: one chunk per record so each row can carry its own access rule.
+            row_meta: list[tuple[str, int, dict]] = []
+            for table in tables:
+                for i, row in enumerate(table["rows"], start=1):
+                    clean, count = sanitize(row_text(i, row))
+                    removed += count
+                    crumb = f"[{doc.title} | {table['heading']} | Row {i}]\n"
+                    pieces.append((table.get("page", 1), f"{table['sheet']} · row {i}", crumb + clean, table["heading"]))
+                    row_meta.append((table["sheet"], i, {k: (v if isinstance(v, (int, float, str)) else str(v)) for k, v in row.items()}))
+
             create_or_update_job(db, doc, status="processing", stage="embedding")
             vectors = ai.embed([p[2] for p in pieces]) if pieces else []
+            chunks = []
             for (page, location, text, heading), vector in zip(pieces, vectors):
-                db.add(
-                    Chunk(
-                        tenant_id=doc.tenant_id,
-                        document_id=doc.id,
-                        page=page,
-                        location=location,
-                        section_heading=heading,
-                        allowed_roles=[],
-                        text=text,
-                        embedding=vector,
-                    )
-                )
+                chunk = Chunk(tenant_id=doc.tenant_id, document_id=doc.id, page=page, location=location,
+                              section_heading=heading, allowed_roles=[], text=text, embedding=vector)
+                db.add(chunk)
+                chunks.append(chunk)
+            db.flush()
+            first_row_chunk = len(chunks) - len(row_meta)
+            for (sheet, idx, data), chunk in zip(row_meta, chunks[first_row_chunk:]):
+                db.add(Record(tenant_id=doc.tenant_id, document_id=doc.id, chunk_id=chunk.id,
+                              sheet=sheet, row_index=idx, data=data))
             doc.page_count = max(1, max([s[0] for s in sections], default=1))
             doc.flagged = removed > 0
             notes = []
             if unread:
                 notes.append(
-                    f"{unread} page(s) had no readable text. Configure a vision model to read scans and images."
+                    f"{unread} page(s) had no readable text, even after OCR."
                 )
             if removed:
                 notes.append(f"{removed} instruction-like passage(s) removed.")
             doc.note = " ".join(notes)
             doc.status = "active"
             db.commit()
+            if doc.row_policy and row_meta:
+                row_security.apply_row_policy(db, doc)
             create_or_update_job(db, doc, status="ready", stage="complete")
             if removed:
                 audit.log(
@@ -704,6 +760,11 @@ def reprocess_document(document_id: str) -> None:
         doc = db.get(Document, document_id)
         if not doc:
             return
+        db.query(Record).filter(Record.document_id == doc.id).delete()
+        chunk_ids = [c for (c,) in db.query(Chunk.id).filter(Chunk.document_id == doc.id).all()]
+        if chunk_ids:
+            from app.models import ChunkAccess
+            db.query(ChunkAccess).filter(ChunkAccess.chunk_id.in_(chunk_ids)).delete(synchronize_session=False)
         db.query(Chunk).filter(Chunk.document_id == doc.id).delete()
         doc.status = "processing"
         doc.version = (doc.version or 1) + 1

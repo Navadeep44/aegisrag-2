@@ -26,6 +26,7 @@ import { ClearancePill, RolePill } from "../ui/StatusPill";
 import { LenisProvider, useLenisContext } from "../motion/LenisProvider";
 import { ToastProvider } from "../ui/Toast";
 import { PageTransition } from "../motion/PageTransition";
+import { Logo } from "../brand/Logo";
 
 interface NavItem {
   path: string;
@@ -106,7 +107,7 @@ export function AppShell() {
   // Group 1: Workspace
   const workspaceItems: NavItem[] = [
     { path: "dashboard", label: "Home", icon: LayoutDashboard },
-    { path: "ask", label: "Ask AI", icon: Sparkles },
+    { path: "ask", label: "Ask Aegis", icon: Sparkles },
     { path: "documents", label: "Documents", icon: FileText },
   ];
   navGroups.push({ label: "Workspace", items: workspaceItems });
@@ -160,247 +161,142 @@ export function AppShell() {
 
   const primaryRole = roles[0] || "employee";
 
+  const tone = ["from-level-0 to-level-0/40", "from-level-1 to-accent", "from-level-2 to-amber-500", "from-level-3 to-rose-500"][user.clearance] || "from-accent to-ai";
+
+  const sidebar = (
+    <>
+      <div className="flex h-16 shrink-0 items-center justify-between px-5">
+        <Link to="/app/dashboard"><Logo size="sm" /></Link>
+        <button type="button" onClick={() => setMobileOpen(false)}
+          className="rounded-lg p-1 text-muted hover:bg-surface-hover hover:text-ink lg:hidden">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      <div className="mx-3 mb-2 flex items-center gap-2.5 rounded-xl border border-line bg-surface-subtle/60 px-3 py-2">
+        {user.tenant_logo ? (
+          <img src={user.tenant_logo} alt="" className="h-7 w-7 rounded-lg object-contain" />
+        ) : (
+          <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-ai/40 to-accent/30 text-[10px] font-bold text-ink">
+            {(user.tenant || "HQ").slice(0, 2).toUpperCase()}
+          </div>
+        )}
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold text-ink">{user.tenant || "Workspace"}</p>
+          <p className="flex items-center gap-1 text-[10px] text-allow"><span className="h-1.5 w-1.5 rounded-full bg-allow" /> Isolated tenant</p>
+        </div>
+      </div>
+
+      <nav className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-3">
+        {navGroups.map((group, gIdx) => (
+          <div key={gIdx}>
+            {group.label && (
+              <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-light">{group.label}</p>
+            )}
+            <ul className="space-y-0.5">
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <li key={item.path}>
+                    <NavLink to={`/app/${item.path}`}
+                      className={({ isActive }) =>
+                        `group relative flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors ${
+                          isActive ? "text-ink" : "text-muted hover:bg-surface-hover/60 hover:text-ink"}`}>
+                      {({ isActive }) => (
+                        <>
+                          {isActive && (
+                            <motion.span layoutId="nav-active"
+                              className="absolute inset-0 rounded-xl border border-accent/25 bg-gradient-to-r from-accent/15 to-transparent"
+                              transition={{ type: "spring", stiffness: 450, damping: 35 }} />
+                          )}
+                          <span className="relative flex min-w-0 items-center gap-3">
+                            <Icon className={`h-[18px] w-[18px] shrink-0 ${isActive ? "text-accent" : "text-muted-light group-hover:text-ink-light"}`} strokeWidth={1.9} />
+                            <span className="truncate font-medium">{item.label}</span>
+                          </span>
+                          {item.badge !== undefined && (
+                            <span className="relative rounded-full bg-warn/15 px-1.5 text-[11px] font-bold text-warn">{item.badge}</span>
+                          )}
+                        </>
+                      )}
+                    </NavLink>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      <div className="shrink-0 border-t border-line p-3">
+        <div className="relative">
+          <AnimatePresence>
+            {userMenuOpen && (
+              <motion.div initial={{ opacity: 0, y: 6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.97 }} transition={{ duration: 0.15 }}
+                className="glass absolute bottom-full left-0 right-0 mb-2 space-y-1 rounded-xl p-1.5 shadow-lg">
+                <button onClick={() => { setUserMenuOpen(false); navigate("/app/profile"); }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-ink hover:bg-surface-hover">
+                  <UserIcon className="h-4 w-4 text-muted" /> Profile
+                </button>
+                <button onClick={() => { setUserMenuOpen(false); signOut(); navigate("/signin"); }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-deny hover:bg-deny-bg">
+                  <LogOut className="h-4 w-4" /> Switch persona
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <button type="button" onClick={() => setUserMenuOpen(!userMenuOpen)}
+            className="flex w-full items-center justify-between gap-2 rounded-xl p-2 text-left hover:bg-surface-hover">
+            <span className="flex min-w-0 items-center gap-2.5">
+              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br p-[2px] ${tone}`}>
+                <span className="grid h-full w-full place-items-center rounded-full bg-surface text-xs font-bold text-ink">{initials}</span>
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold text-ink">{user.name}</span>
+                <span className="mt-0.5 flex items-center gap-1.5">
+                  <ClearancePill clearance={user.clearance} label={user.clearance_label} />
+                </span>
+              </span>
+            </span>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-muted transition-transform ${userMenuOpen ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <ToastProvider>
       <LenisProvider scrollerRef={mainRef}>
-        <div className="flex h-screen w-full overflow-hidden bg-page text-ink font-sans">
-          {/* Mobile Top App Bar (<1024px) */}
-          <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex h-14 items-center justify-between border-b border-line bg-surface px-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <button
-                type="button"
-                onClick={() => setMobileOpen(!mobileOpen)}
-                aria-label="Toggle Navigation"
-                className="rounded-lg p-1.5 text-muted hover:bg-surface-hover hover:text-ink shrink-0"
-              >
+        <div className="flex h-screen w-full overflow-hidden text-ink">
+          {/* Mobile top bar */}
+          <div className="fixed left-0 right-0 top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-page/80 px-4 backdrop-blur-xl lg:hidden">
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle navigation"
+                className="rounded-lg p-1.5 text-muted hover:bg-surface-hover hover:text-ink">
                 {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </button>
-              <Link to="/app/dashboard" className="flex items-center gap-2 min-w-0">
-                {user.tenant_logo ? (
-                  <img
-                    src={user.tenant_logo}
-                    alt={user.tenant || "Logo"}
-                    className="h-6 w-6 rounded-md object-contain shrink-0"
-                  />
-                ) : (
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-ink text-white font-mono text-[0.65rem] font-bold">
-                    {(user.tenant || "HQ").slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-                <span className="display text-base font-semibold tracking-tight text-ink truncate">
-                  {user.tenant || "Enterprise Workspace"}
-                </span>
-              </Link>
+              <Link to="/app/dashboard"><Logo size="sm" /></Link>
             </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <ClearancePill clearance={user.clearance} label={user.clearance_label} />
-              <button
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white font-medium text-xs shadow-xs"
-              >
-                {initials}
-              </button>
-            </div>
+            <ClearancePill clearance={user.clearance} label={user.clearance_label} />
           </div>
 
-          {/* Backdrop for Mobile Drawer */}
           {mobileOpen && (
-            <div
-              className="lg:hidden fixed inset-0 z-40 bg-ink/40 backdrop-blur-xs"
-              onClick={() => setMobileOpen(false)}
-            />
+            <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setMobileOpen(false)} />
           )}
 
-          {/* Sidebar (Desktop 260px, Tablet Icon Rail 72px / Collapsible, Mobile Drawer) */}
-          <aside
-            aria-label="Main Navigation"
-            className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-line bg-surface transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 ${
-              mobileOpen ? "translate-x-0 w-72 shadow-2xl" : "-translate-x-full lg:w-64"
-            }`}
-          >
-            {/* Sidebar Brand Header */}
-            <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-5">
-              <Link to="/app/dashboard" className="flex items-center gap-2.5 min-w-0">
-                {user.tenant_logo ? (
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-subtle border border-line p-1 shadow-xs overflow-hidden">
-                    <img
-                      src={user.tenant_logo}
-                      alt={user.tenant || "Company Logo"}
-                      className="h-full w-full object-contain"
-                    />
-                  </div>
-                ) : (
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-ink text-white font-bold text-xs shadow-xs">
-                    {(user.tenant || "HQ").slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <span className="display text-sm font-bold tracking-tight text-ink block leading-tight truncate">
-                    {user.tenant || "Enterprise Workspace"}
-                  </span>
-                  <span className="text-[0.65rem] font-mono text-muted uppercase tracking-wider block mt-0.5 truncate">
-                    {user.tenant_category ? `${user.tenant_category} Workspace` : "Verified Portal"}
-                  </span>
-                </div>
-              </Link>
-
-              {/* Close Button on Mobile Drawer */}
-              <button
-                type="button"
-                onClick={() => setMobileOpen(false)}
-                className="lg:hidden rounded-lg p-1 text-muted hover:bg-surface-hover hover:text-ink shrink-0"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Navigation Groups List */}
-            <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-6">
-              {navGroups.map((group, gIdx) => (
-                <div key={gIdx} className="space-y-1">
-                  {group.label && (
-                    <p className="px-3 text-[0.65rem] font-bold uppercase tracking-wider text-muted font-mono mb-2">
-                      {group.label}
-                    </p>
-                  )}
-                  <ul className="space-y-0.5">
-                    {group.items.map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <li key={item.path}>
-                          <NavLink
-                            to={`/app/${item.path}`}
-                            className={({ isActive }) =>
-                              `group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs sm:text-sm transition-all duration-150 ${
-                                isActive
-                                  ? "font-semibold text-indigo-700 bg-indigo-50/80 shadow-2xs"
-                                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                              }`
-                            }
-                          >
-                            {({ isActive }) => (
-                              <>
-                                {/* Left Animated Active Pill Bar */}
-                                {isActive && (
-                                  <motion.span
-                                    layoutId="sidebar-active-indicator"
-                                    className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-md bg-indigo-600"
-                                    transition={{ type: "spring", stiffness: 450, damping: 35 }}
-                                  />
-                                )}
-
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <Icon
-                                    className={`h-4.5 w-4.5 shrink-0 transition-colors ${
-                                      isActive ? "text-indigo-600" : "text-slate-400 group-hover:text-slate-700"
-                                    }`}
-                                  />
-                                  <span className="truncate">{item.label}</span>
-                                </div>
-
-                                {item.badge !== undefined && (
-                                  <span className="rounded-full bg-warn-bg text-warn border border-warn-border px-1.5 py-0.2 text-[0.7rem] font-semibold font-mono">
-                                    {item.badge}
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </NavLink>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))}
-            </nav>
-
-            {/* Bottom User Profile Section */}
-            <div className="shrink-0 border-t border-line bg-surface-subtle/40 p-3">
-              <div className="relative">
-                {/* Popover Menu for Switch Persona / Sign Out */}
-                <AnimatePresence>
-                  {userMenuOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 6, scale: 0.96 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 6, scale: 0.96 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border border-line bg-surface p-2 shadow-lg space-y-1"
-                    >
-                      <button
-                        onClick={() => {
-                          setUserMenuOpen(false);
-                          navigate("/app/profile");
-                        }}
-                        className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs text-ink hover:bg-surface-hover transition-colors text-left"
-                      >
-                        <UserIcon className="h-4 w-4 text-muted" />
-                        <span>My Profile & Clearances</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setUserMenuOpen(false);
-                          signOut();
-                          navigate("/signin");
-                        }}
-                        className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs text-deny hover:bg-deny-bg transition-colors text-left"
-                      >
-                        <LogOut className="h-4 w-4" />
-                        <span>Switch Persona / Sign out</span>
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* User Card Trigger */}
-                <button
-                  type="button"
-                  onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="flex w-full items-center justify-between rounded-lg p-2 hover:bg-surface-hover transition-colors text-left"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-white font-medium text-xs shadow-xs">
-                      {initials}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-ink truncate leading-tight">{user.name}</p>
-                      <div className="mt-0.5 flex items-center gap-1.5">
-                        <span className="text-[0.65rem] text-muted truncate font-mono">{primaryRole}</span>
-                        <span className="text-[0.65rem] text-muted">•</span>
-                        <span className="text-[0.65rem] text-muted font-mono">{user.clearance_label}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <ChevronDown
-                    className={`h-4 w-4 text-muted shrink-0 transition-transform ${
-                      userMenuOpen ? "rotate-180" : ""
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
+          <aside aria-label="Main navigation"
+            className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-line bg-surface/80 backdrop-blur-xl transition-transform duration-300 lg:static lg:translate-x-0 ${
+              mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
+            {sidebar}
           </aside>
 
-          {/* Main Content Area with Scroll Progress */}
           <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden pt-14 lg:pt-0">
-            {/* Top Page Scroll Progress Bar */}
-            <div
-              className="absolute top-0 left-0 right-0 z-20 h-0.5 bg-transparent"
-              aria-hidden="true"
-            >
-              <div
-                className="h-full bg-accent transition-all duration-75"
-                style={{ width: `${scrollProgress}%` }}
-              />
+            <div className="absolute left-0 right-0 top-0 z-20 h-0.5" aria-hidden="true">
+              <div className="h-full bg-gradient-to-r from-accent to-ai transition-all duration-75" style={{ width: `${scrollProgress}%` }} />
             </div>
-
-            {/* Scrollable Container with Lenis scroller */}
-            <main
-              ref={mainRef}
-              className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8 lg:px-12"
-            >
-              <div className="mx-auto max-w-6xl w-full">
+            <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 lg:px-10">
+              <div className="mx-auto w-full max-w-7xl">
                 <AnimatePresence mode="wait" initial={false}>
                   <PageTransition key={location.pathname} className="h-full">
                     {outlet}

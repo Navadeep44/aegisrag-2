@@ -15,43 +15,21 @@ def test_gemini_settings_loaded():
 
 
 def test_gemini_answer_successful_call():
+    """The Gemini answer path returns points that each carry their own citations"""
+    from app import answering, llm
     evidence = [
         {"id": 101, "title": "Hospital Medical Protocol", "page": 1, "text": "Patient vitals must be monitored every 4 hours."},
-        {"id": 102, "title": "Hospital Medical Protocol", "page": 2, "text": "Emergency triage priority 1 requires immediate physician review."}
+        {"id": 102, "title": "Hospital Medical Protocol", "page": 2, "text": "Emergency triage priority 1 requires immediate physician review."},
     ]
-    mock_gemini_response = {
-        "candidates": [
-            {
-                "content": {
-                    "parts": [
-                        {
-                            "text": (
-                                '{\n'
-                                '  "answerable": true,\n'
-                                '  "answer": "**Direct Answer**\\nPatient vitals must be monitored every 4 hours according to hospital protocol.\\n\\n**Key Details & Breakdown**\\n- Emergency triage priority 1 demands immediate physician review.\\n- Continuous monitoring protocol active.",\n'
-                                '  "citations": [101, 102]\n'
-                                '}'
-                            )
-                        }
-                    ],
-                    "role": "model"
-                },
-                "finishReason": "STOP"
-            }
-        ]
-    }
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = mock_gemini_response
-    mock_resp.raise_for_status = MagicMock()
-
-    with patch.object(settings, "gemini_api_key", "mock-gemini-key-123"):
-        with patch("httpx.Client.post", return_value=mock_resp):
-            res = ai.answer("How often must patient vitals be monitored?", evidence)
-            assert res["answerable"] is True
-            assert "**Direct Answer**" in res["answer"]
-            assert 101 in res["citations"]
+    reply = {"answerable": True, "answer": "Every 4 hours.",
+             "points": [{"text": "Patient vitals must be monitored every 4 hours.", "citations": [101]},
+                        {"text": "Triage priority 1 requires immediate physician review [102].", "citations": []}]}
+    with patch.object(llm, "generate_json", return_value=reply):
+        res = answering.generate("How often must patient vitals be monitored?", evidence, [])
+    assert res["answerable"] is True
+    assert res["points"][0]["citations"] == [101]
+    # An inline marker is lifted out of the text into the citation list.
+    assert res["points"][1] == {"text": "Triage priority 1 requires immediate physician review.", "citations": [102]}
 
 
 def test_gemini_fallback_on_api_error():

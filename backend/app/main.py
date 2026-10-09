@@ -15,6 +15,9 @@ async def lifespan(app: FastAPI):
 
         with SessionLocal() as db:
             seed_if_empty(db)
+    from app.reindex import migrate_legacy_section_rules
+    with SessionLocal() as db:
+        migrate_legacy_section_rules(db)
     yield
 
 

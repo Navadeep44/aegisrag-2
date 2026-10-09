@@ -1,25 +1,42 @@
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { Button } from "../components/ui/Button";
+import {
+  ArrowRight, Briefcase, Building2, Code2, Crown, FileCog, Globe2, HeartHandshake, KeyRound, Loader2, Lock, ScrollText,
+  ShieldCheck, User, UserCog, Users, Wallet, type LucideIcon,
+} from "lucide-react";
+import { Logo } from "../components/brand/Logo";
 import { inputClass } from "../components/ui/field";
 import { Notice } from "../components/ui/Notice";
 import { useAuth } from "../context/AuthContext";
 import { api, post } from "../lib/api";
-import type { DemoUser, Session } from "../lib/types";
-import { Shield, Sparkles, ArrowRight, Lock, CheckCircle2, UserCheck } from "lucide-react";
-import { ClearancePill, RolePill } from "../components/ui/StatusPill";
+import { LEVELS, type DemoUser, type Session } from "../lib/types";
+
+const ROLE_ICON: Record<string, LucideIcon> = {
+  admin: UserCog, organization_owner: Crown, iam_admin: KeyRound, document_manager: FileCog,
+  security_auditor: ScrollText, department_manager: Building2, team_lead: Users, hr: HeartHandshake,
+  finance: Wallet, engineering: Code2, executive: Briefcase, employee: User, platform_super_admin: Globe2,
+};
+const RING = ["from-level-0 to-slate-300", "from-level-1 to-sky-300", "from-level-2 to-amber-300", "from-level-3 to-rose-300"];
+const LEVEL_TEXT = ["text-level-0", "text-level-1", "text-level-2", "text-level-3"];
+const LEVEL_NAME = Object.fromEntries(LEVELS.map((l, i) => [l.toLowerCase(), i]));
+
+const FILTERS = [
+  { id: "featured", label: "Demo story", icon: ShieldCheck },
+  { id: "all", label: "Everyone", icon: Users },
+];
+const FEATURED = ["employee@acme.test", "finance@acme.test", "engineer@acme.test", "hr@acme.test", "admin@acme.test", "user@globex.test"];
 
 export default function SignIn() {
   const { user, ready, signIn } = useAuth();
   const navigate = useNavigate();
-  const reduce = useReducedMotion();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [demoUsers, setDemoUsers] = useState<DemoUser[]>([]);
-  const [filterRole, setFilterRole] = useState("all");
-  const [loggingInEmail, setLoggingInEmail] = useState<string | null>(null);
+  const [filter, setFilter] = useState("featured");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
     api<DemoUser[]>("/auth/demo-users").then(setDemoUsers).catch((e) => setError(e.message));
@@ -27,195 +44,103 @@ export default function SignIn() {
 
   if (ready && user) return <Navigate to="/app" replace />;
 
-  async function finish(request: Promise<Session>, emailTarget?: string) {
+  async function finish(request: Promise<Session>, target: string) {
     setError("");
-    if (emailTarget) setLoggingInEmail(emailTarget);
+    setBusy(target);
     try {
       signIn(await request);
-      navigate("/app");
+      navigate("/app/ask");
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setLoggingInEmail(null);
+      setBusy(null);
     }
   }
 
-  const roleCategories = [
-    { id: "all", label: "All Roles" },
-    { id: "admin", label: "Admin & IAM" },
-    { id: "operations", label: "Docs & Audit" },
-    { id: "teams", label: "Dept & Leads" },
-    { id: "specialists", label: "Finance & HR" },
-    { id: "platform", label: "Super Admin" },
-  ];
-
-  const filteredUsers = demoUsers.filter((u) => {
-    if (filterRole === "all") return true;
-    if (filterRole === "platform") return u.roles.includes("platform_super_admin");
-    if (filterRole === "admin") return u.roles.some((r) => ["admin", "organization_owner", "iam_admin"].includes(r));
-    if (filterRole === "operations") return u.roles.some((r) => ["document_manager", "security_auditor"].includes(r));
-    if (filterRole === "teams") return u.roles.some((r) => ["department_manager", "team_lead"].includes(r));
-    if (filterRole === "specialists") return u.roles.some((r) => ["hr", "finance", "engineering"].includes(r));
-    return true;
-  });
+  const people = filter === "featured"
+    ? FEATURED.map((e) => demoUsers.find((u) => u.email === e)).filter(Boolean) as DemoUser[]
+    : demoUsers;
 
   return (
-    <main className="mx-auto grid min-h-screen max-w-6xl items-start gap-10 px-6 py-12 lg:grid-cols-[1fr_1.4fr]">
-      {/* Left Column: Direct Authentication Card */}
-      <section className="sticky top-12 space-y-6">
-        <Link to="/" className="display flex items-center gap-2 text-2xl text-ink">
-          <Shield className="h-6 w-6 text-accent" />
-          <span>AegisRAG</span>
-        </Link>
-
-        <div className="space-y-2">
-          <h1 className="display text-4xl sm:text-5xl font-semibold text-ink">Sign in</h1>
-          <p className="text-sm leading-relaxed text-muted">
-            Access is enforced cryptographically based on verified server identity, clearance tier, and departmental grants.
-          </p>
+    <main className="relative min-h-screen">
+      <div className="grid-bg pointer-events-none absolute inset-0 opacity-60" />
+      <div className="relative mx-auto max-w-6xl px-5 py-8">
+        <div className="flex items-center justify-between">
+          <Link to="/"><Logo /></Link>
+          <button onClick={() => setShowForm(!showForm)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink-light hover:border-accent/40 hover:text-accent">
+            <Lock className="h-3.5 w-3.5" /> Email sign-in
+          </button>
         </div>
 
-        <form
-          className="rounded-2xl border border-line bg-surface p-6 shadow-xs space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            finish(post<Session>("/auth/login", { email, password }));
-          }}
-        >
-          <label className="block text-xs font-semibold text-ink">
-            Work Email
-            <input
-              className={`${inputClass} mt-1.5`}
-              type="email"
-              required
-              autoComplete="username"
-              placeholder="e.g. adithya@business.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
+        <div className="mt-12 text-center">
+          <h1 className="display text-4xl text-ink sm:text-5xl">Pick who you are.</h1>
+          <p className="mt-2 text-muted">Each persona sees a different slice of the same company.</p>
+        </div>
 
-          <label className="block text-xs font-semibold text-ink">
-            Password
-            <input
-              className={`${inputClass} mt-1.5`}
-              type="password"
-              required
-              autoComplete="current-password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-
-          {error && <Notice tone="error">{error}</Notice>}
-
-          <Button type="submit" className="w-full py-2.5">
-            Sign In with Credentials
-          </Button>
-
-          <div className="pt-2 border-t border-line text-center text-xs text-muted">
-            Setting up a new tenant?{" "}
-            <Link to="/register" className="font-semibold text-accent hover:underline">
-              Register company workspace →
-            </Link>
-          </div>
-        </form>
-      </section>
-
-      {/* Right Column: 1-Click Interactive Persona Switcher */}
-      {demoUsers.length > 0 && (
-        <section aria-label="Demo accounts" className="rounded-3xl border border-line bg-surface p-6 sm:p-8 shadow-xs space-y-6">
-          {/* Header */}
-          <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-accent" />
-                <h2 className="text-lg sm:text-xl font-bold text-ink">1-Click Demo Personas</h2>
-              </div>
-              <p className="mt-0.5 text-xs text-muted">Instant role simulation to test clearance boundaries</p>
-            </div>
-            <span className="rounded-full bg-accent-light px-2.5 py-0.5 text-[0.7rem] font-bold font-mono text-accent">
-              11 VERIFIED ROLES
-            </span>
-          </div>
-
-          {/* Segmented Filter Pills */}
-          <div className="flex flex-wrap gap-1.5">
-            {roleCategories.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setFilterRole(c.id)}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-all ${
-                  filterRole === c.id
-                    ? "bg-ink text-white shadow-2xs"
-                    : "border border-line bg-surface text-muted hover:border-ink/60 hover:text-ink"
-                }`}
-              >
-                {c.label}
+        <AnimatePresence>
+          {showForm && (
+            <motion.form initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+              onSubmit={(e) => { e.preventDefault(); finish(post<Session>("/auth/login", { email, password }), "form"); }}
+              className="glass mx-auto mt-6 flex max-w-xl flex-col gap-2 overflow-hidden rounded-2xl p-3 sm:flex-row">
+              <input className={inputClass} type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <input className={inputClass} type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <button className="btn-primary inline-flex items-center justify-center gap-1 rounded-xl px-4 py-2.5 text-sm" disabled={busy === "form"}>
+                {busy === "form" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
               </button>
-            ))}
-          </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
 
-          {/* Personas Grid */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            {filteredUsers.map((u, i) => {
-              const initials = u.name
-                .split(" ")
-                .map((n) => n[0])
-                .slice(0, 2)
-                .join("")
-                .toUpperCase();
-              const isLoggingIn = loggingInEmail === u.email;
+        {error && <Notice tone="error" className="mx-auto mt-6 max-w-xl">{error}</Notice>}
 
-              return (
-                <motion.button
-                  key={u.email}
-                  initial={reduce ? false : { opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.02 * i, duration: 0.2 }}
-                  onClick={() => finish(post<Session>("/auth/demo-login", { email: u.email }), u.email)}
-                  disabled={Boolean(loggingInEmail)}
-                  className="group flex flex-col justify-between rounded-xl border border-line bg-page p-4 text-left transition-all hover:border-accent hover:bg-surface hover:shadow-xs disabled:opacity-60 cursor-pointer"
-                >
-                  <div className="space-y-2.5 w-full">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink text-white font-bold text-xs shadow-2xs group-hover:bg-accent transition-colors">
-                          {initials}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-ink group-hover:text-accent transition-colors leading-tight truncate">
-                            {u.name}
-                          </p>
-                          <span className="text-[0.65rem] text-muted block truncate font-mono">
-                            {u.tenant} • {u.department || "HQ"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+        <div className="mt-8 flex justify-center gap-2">
+          {FILTERS.map((f) => {
+            const Icon = f.icon;
+            return (
+              <button key={f.id} onClick={() => setFilter(f.id)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  filter === f.id ? "border-accent bg-accent text-white" : "border-line bg-surface text-muted hover:text-ink"}`}>
+                <Icon className="h-3.5 w-3.5" /> {f.label}
+              </button>
+            );
+          })}
+        </div>
 
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="rounded bg-surface px-1.5 py-0.5 text-[0.65rem] font-medium text-ink border border-line truncate max-w-[140px]">
-                        {u.roles[0] || "employee"}
-                      </span>
-                      <span className="rounded bg-accent-light px-1.5 py-0.5 text-[0.65rem] font-semibold text-accent">
-                        {u.clearance_label || "Internal"}
-                      </span>
-                    </div>
-                  </div>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {people.map((u, i) => {
+            const lvl = LEVEL_NAME[(u.clearance_label || "internal").toLowerCase()] ?? 1;
+            const main = u.roles.find((r) => r !== "employee") ?? u.roles[0] ?? "employee";
+            const Icon = ROLE_ICON[main] ?? User;
+            const name = u.name.replace(/\s*\(.*\)/, "");
+            return (
+              <motion.button key={u.email} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                onClick={() => finish(post<Session>("/auth/demo-login", { email: u.email }), u.email)}
+                disabled={busy !== null}
+                className="glass glass-hover group relative flex items-center gap-4 overflow-hidden rounded-3xl p-4 text-left disabled:opacity-60">
+                <span className={`grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br p-[2px] ${RING[lvl]}`}>
+                  <span className="grid h-full w-full place-items-center rounded-[14px] bg-surface">
+                    {busy === u.email ? <Loader2 className="h-6 w-6 animate-spin text-accent" /> : <Icon className={`h-6 w-6 ${LEVEL_TEXT[lvl]}`} strokeWidth={1.7} />}
+                  </span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="display block truncate text-lg text-ink">{name}</span>
+                  <span className="block truncate text-xs capitalize text-muted">{main.replace(/_/g, " ")} · {u.department || u.tenant}</span>
+                  <span className={`mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold ${LEVEL_TEXT[lvl]}`}>
+                    <Lock className="h-3 w-3" /> {LEVELS[lvl]}
+                    {u.tenant !== "Acme Corp" && <span className="ml-1 rounded-full bg-ai-light px-1.5 text-ai">{u.tenant}</span>}
+                  </span>
+                </span>
+                <ArrowRight className="h-4 w-4 shrink-0 text-muted-light transition-transform group-hover:translate-x-1 group-hover:text-accent" />
+              </motion.button>
+            );
+          })}
+        </div>
 
-                  <div className="mt-3 flex items-center justify-between border-t border-line/60 pt-2 text-[0.7rem] text-muted group-hover:text-accent w-full font-medium">
-                    <span>{isLoggingIn ? "Authenticating..." : "Click to sign in"}</span>
-                    <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </motion.button>
-              );
-            })}
-          </div>
-        </section>
-      )}
+        <p className="mt-10 text-center text-xs text-muted">
+          New company? <Link to="/register" className="font-semibold text-accent hover:underline">Register a workspace</Link>
+        </p>
+      </div>
     </main>
   );
 }
-

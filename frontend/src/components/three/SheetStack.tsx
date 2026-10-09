@@ -27,7 +27,7 @@ export default function SheetStack() {
     stack.rotation.set(0.12, -0.62, 0);
     scene.add(stack);
 
-    const ink = 0x0f1215, green = 0x1c4a3a, grey = 0xb4b8bc;
+    const ink = 0x1b2230, green = 0x0f766e, grey = 0xc9bfa9;
     const paper = new THREE.PlaneGeometry(2.2, 3);
     const outline = new THREE.EdgesGeometry(paper);
     const disposables: { dispose: () => void }[] = [paper, outline];
@@ -44,7 +44,7 @@ export default function SheetStack() {
     for (let i = 0; i < COUNT; i++) {
       const open = i % 3 !== 1;
       const group = new THREE.Group();
-      const fill = new THREE.MeshBasicMaterial({ color: open ? 0xffffff : 0xefefed, side: THREE.DoubleSide });
+      const fill = new THREE.MeshBasicMaterial({ color: open ? 0xfffcf6 : 0xebe3d2, side: THREE.DoubleSide });
       const edge = new THREE.LineBasicMaterial({ color: open ? ink : grey });
       disposables.push(fill, edge);
       group.add(new THREE.Mesh(paper, fill), new THREE.LineSegments(outline, edge));
@@ -55,7 +55,7 @@ export default function SheetStack() {
       group.add(heading);
       for (let row = 0; row < 8; row++) {
         const width = open ? widths[(row + i) % widths.length] : 1.72;
-        const line = bar(width, open ? 0.035 : 0.1, open ? 0x8a9097 : ink, open ? 1 : 0.88);
+        const line = bar(width, open ? 0.035 : 0.1, open ? 0x9a948a : ink, open ? 1 : 0.88);
         line.position.set(-0.86 + width / 2, 0.72 - row * 0.26, 0.004);
         group.add(line);
       }
