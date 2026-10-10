@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import { Logo } from "../components/brand/Logo";
 import { Button } from "../components/ui/Button";
-import { inputClass } from "../components/ui/field";
 import { Notice } from "../components/ui/Notice";
 import { useAuth } from "../context/AuthContext";
 import { api, post } from "../lib/api";
