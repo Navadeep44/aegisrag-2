@@ -4,9 +4,9 @@ serves the API and (when built) the frontend.
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import router
@@ -30,14 +30,35 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Eyes Only API", lifespan=lifespan)
 
-# Enable CORS for web clients
+# Enable CORS for web clients (Render, Vercel, localhost, custom domains)
+raw_origins = (getattr(settings, "cors_origins", "*") or "*").strip()
+parsed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()] if raw_origins != "*" else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=parsed_origins if "*" not in parsed_origins else ["*"],
+    allow_origin_regex=r"^https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_cors_handler(request: Request, exc: Exception):
+    """Guarantees CORS headers are always returned even when an internal server error occurs."""
+    origin = request.headers.get("origin") or "*"
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {exc}"},
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 app.include_router(router)
 # Handle potential double-prefix from rewrites or VITE_API_BASE_URL ending with /api

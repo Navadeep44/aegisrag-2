@@ -27,11 +27,31 @@ function buildApiUrl(path: string): string {
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const url = buildApiUrl(path);
-  let response: Response;
-  try {
-    response = await fetch(url, { ...init, headers: headers(init.body) });
-  } catch {
-    throw new Error("Cannot reach the server. Check that the backend is running on port 8000.");
+  let response: Response | undefined;
+  const mergedHeaders = {
+    ...headers(init.body),
+    ...((init.headers as Record<string, string>) || {}),
+  };
+
+  let attempts = 0;
+  while (attempts < 2) {
+    try {
+      response = await fetch(url, { ...init, headers: mergedHeaders });
+      break;
+    } catch {
+      attempts++;
+      if (attempts < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        continue;
+      }
+      throw new Error(
+        "Cannot reach the server. If hosted on Render free tier, the backend may take 30–50 seconds to wake up from sleep. Please wait a moment and refresh."
+      );
+    }
+  }
+
+  if (!response) {
+    throw new Error("Cannot reach the server.");
   }
   if (response.status === 401 && token) {
     setToken("");
