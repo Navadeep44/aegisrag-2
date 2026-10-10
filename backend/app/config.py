@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     jwt_secret: str = "dev-only-change-me-32-byte-secure-secret-key-eyes-only"
     jwt_minutes: int = 480
+    cors_origins: str = "*"
 
     # Demo conveniences. Turn both off outside a demo.
     demo_mode: bool = True         # one-click login as seeded users
