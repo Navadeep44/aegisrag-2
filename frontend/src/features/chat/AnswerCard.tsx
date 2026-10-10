@@ -7,6 +7,7 @@ import type { Citation, Claim, Message } from "../../lib/types";
 import { kindStyle } from "../../lib/kinds";
 import { MarkdownContent } from "./StructuredAnswer";
 import { PipelineTrace } from "./PipelineTrace";
+import { ReadAloudButton } from "./ReadAloudButton";
 
 const LEVEL_DOT = ["bg-level-0", "bg-level-1", "bg-level-2", "bg-level-3"];
 
@@ -265,9 +266,17 @@ export function AnswerCard({
     setActiveClaimIndex(999);
   };
 
+  const msgKey = message.id
+    ? `msg_${message.id}`
+    : `msg_${fullContent.slice(0, 32)}_${meta?.claims?.length || 0}`;
+
+  const readButton = fullContent.trim() && !isTyping ? (
+    <ReadAloudButton text={fullContent} id={msgKey} />
+  ) : null;
+
   if (message.status === "redacted") {
     return (
-      <Shell tone="deny" icon={EyeOff} label="Withdrawn" onClick={skipAnimation}>
+      <Shell tone="deny" icon={EyeOff} label="Withdrawn" actions={readButton} onClick={skipAnimation}>
         <p className="text-sm text-ink-light">
           {message.isNew && isTyping ? displayedText : message.content}
         </p>
@@ -277,7 +286,7 @@ export function AnswerCard({
 
   if (message.status === "refused") {
     return (
-      <Shell tone="deny" icon={ShieldX} label="Blocked" scopedCount={scopedCount} onClick={skipAnimation}>
+      <Shell tone="deny" icon={ShieldX} label="Blocked" scopedCount={scopedCount} actions={readButton} onClick={skipAnimation}>
         <p className="text-sm text-ink-light">
           {message.isNew && isTyping ? displayedText : message.content}
         </p>
@@ -381,6 +390,7 @@ export function AnswerCard({
         icon={computed ? Calculator : ShieldCheck}
         label={computed ? "Computed" : "Grounded"}
         scopedCount={scopedCount}
+        actions={readButton}
         right={meta?.grounding && !isTyping ? <GroundingRing score={meta.grounding.score} /> : null}
         onClick={skipAnimation}
       >
@@ -457,6 +467,7 @@ export function AnswerCard({
       icon={computed ? Calculator : ShieldCheck}
       label={computed ? "Computed" : "Grounded"}
       scopedCount={scopedCount}
+      actions={readButton}
       right={meta.grounding && !isTyping ? <GroundingRing score={meta.grounding.score} /> : null}
       onClick={skipAnimation}
     >
@@ -645,6 +656,7 @@ function Shell({
   icon: Icon,
   label,
   scopedCount,
+  actions,
   right,
   onClick,
   children,
@@ -653,6 +665,7 @@ function Shell({
   icon: typeof ShieldCheck;
   label: string;
   scopedCount?: number;
+  actions?: React.ReactNode;
   right?: React.ReactNode;
   onClick?: () => void;
   children: React.ReactNode;
@@ -677,7 +690,10 @@ function Shell({
             </span>
           )}
         </div>
-        {right}
+        <div className="flex items-center gap-2">
+          {actions}
+          {right}
+        </div>
       </div>
       {children}
     </motion.div>
