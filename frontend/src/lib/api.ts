@@ -30,17 +30,30 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     setToken("");
     window.dispatchEvent(new Event("aegis-signed-out"));
   }
+  const rawText = await response.text();
+  const trimmed = rawText.trim();
+  if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
+    throw new Error(
+      "The server returned an HTML page instead of API JSON. If your frontend is hosted separately from your backend, set VITE_API_BASE_URL to your backend URL, or configure an /api/* rewrite."
+    );
+  }
+
   if (!response.ok) {
     let message = response.status >= 500
       ? "The server could not handle the request. Check that the backend is running on port 8000."
       : `Request failed (${response.status}).`;
     try {
-      const body = await response.json();
+      const body = JSON.parse(rawText);
       if (typeof body.detail === "string") message = body.detail;
     } catch { /* keep the default message */ }
     throw new Error(message);
   }
-  return response.json();
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    throw new Error("Invalid response format from server.");
+  }
 }
 
 export const post = <T,>(path: string, body: unknown) =>
