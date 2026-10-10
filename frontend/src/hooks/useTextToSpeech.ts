@@ -48,6 +48,96 @@ function splitIntoSentences(text: string): string[] {
   return sentences.map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
+/**
+ * Selects the highest quality natural female voice available in the browser.
+ */
+function selectNaturalFemaleVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  if (!voices || voices.length === 0) return null;
+
+  // Priority 1: High quality Natural / Neural Female voices
+  const highQualityFemaleNames = [
+    "microsoft jenny online (natural)",
+    "microsoft aria online (natural)",
+    "google us english",
+    "google uk english female",
+    "samantha",
+    "ava (premium)",
+    "ava (enhanced)",
+    "ava",
+    "allison",
+    "victoria",
+    "karen",
+    "serena",
+    "microsoft zira",
+    "zira",
+  ];
+
+  for (const name of highQualityFemaleNames) {
+    const found = voices.find(
+      (v) => v.lang.startsWith("en") && v.name.toLowerCase().includes(name)
+    );
+    if (found) return found;
+  }
+
+  // Priority 2: Any English voice with "female" or "woman" in its name
+  const genericFemale = voices.find(
+    (v) =>
+      v.lang.startsWith("en") &&
+      (v.name.toLowerCase().includes("female") ||
+        v.name.toLowerCase().includes("woman") ||
+        v.name.toLowerCase().includes("girl"))
+  );
+  if (genericFemale) return genericFemale;
+
+  // Priority 3: Common female voice identifiers
+  const knownFemaleNames = [
+    "samantha",
+    "aria",
+    "jenny",
+    "zira",
+    "victoria",
+    "karen",
+    "susan",
+    "ava",
+    "allison",
+    "serena",
+    "stephanie",
+    "moira",
+    "tessa",
+  ];
+  const knownFemale = voices.find(
+    (v) =>
+      v.lang.startsWith("en") &&
+      knownFemaleNames.some((n) => v.name.toLowerCase().includes(n))
+  );
+  if (knownFemale) return knownFemale;
+
+  // Priority 4: Any English voice that is NOT explicitly male
+  const maleExclusions = [
+    "david",
+    "mark",
+    "guy",
+    "george",
+    "alex",
+    "fred",
+    "daniel",
+    "male",
+    "richard",
+    "james",
+    "brian",
+    "oliver",
+  ];
+  const nonMaleEnglish = voices.find(
+    (v) =>
+      v.lang.startsWith("en") &&
+      !maleExclusions.some((m) => v.name.toLowerCase().includes(m))
+  );
+  if (nonMaleEnglish) return nonMaleEnglish;
+
+  // Fallback: Best English voice
+  return voices.find((v) => v.lang.startsWith("en")) || voices[0] || null;
+}
+
 // Global speaking state so only one message speaks across the app
 let globalStopCallback: (() => void) | null = null;
 
@@ -55,11 +145,31 @@ export function useTextToSpeech() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const isSpeakingRef = useRef(false);
   const sentencesRef = useRef<string[]>([]);
   const currentIndexRef = useRef(0);
   const activeIdRef = useRef<string | null>(null);
+
+  // Pre-load available voices asynchronously
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+    const loadVoices = () => {
+      const v = window.speechSynthesis.getVoices();
+      if (v && v.length > 0) {
+        setVoices(v);
+      }
+    };
+
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
 
   const stop = useCallback(() => {
     isSpeakingRef.current = false;
@@ -95,20 +205,19 @@ export function useTextToSpeech() {
     currentIndexRef.current += 1;
 
     const utterance = new SpeechSynthesisUtterance(sentence);
-    utterance.rate = 1.02; // natural conversational pacing
-    utterance.pitch = 1.0;
+    // Medium, relaxed, conversational pacing (0.88x) so it never sounds rushed
+    utterance.rate = 0.88;
+    // Pleasant natural female pitch
+    utterance.pitch = 1.05;
 
-    // Pick best available English voice
+    // Select the best natural female voice
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(
-        (v) =>
-          (v.lang.startsWith("en") && (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Samantha") || v.name.includes("Guy") || v.name.includes("Aria"))) ||
-          v.lang === "en-US"
-      ) || voices.find((v) => v.lang.startsWith("en"));
+      const currentVoiceList =
+        voices.length > 0 ? voices : window.speechSynthesis.getVoices();
+      const femaleVoice = selectNaturalFemaleVoice(currentVoiceList);
 
-      if (preferred) {
-        utterance.voice = preferred;
+      if (femaleVoice) {
+        utterance.voice = femaleVoice;
       }
     }
 
@@ -127,7 +236,7 @@ export function useTextToSpeech() {
     };
 
     window.speechSynthesis.speak(utterance);
-  }, [stop]);
+  }, [voices, stop]);
 
   const speak = useCallback(
     (text: string, id?: string) => {
