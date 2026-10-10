@@ -1,15 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import {
-  Building2,
-  Users,
-  FileText,
-  Sparkles,
-  KeyRound,
-  Shield,
-  ArrowRight,
-  HelpCircle,
-} from "lucide-react";
+import { FileText, Sparkles, KeyRound } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Building2 as Building2Icon } from "lucide-react";
 import { Button } from "../components/ui/Button";
@@ -20,7 +11,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ClearancePill, RolePill, StatusPill } from "../components/ui/StatusPill";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import { LEVELS, type DepartmentInsights as DeptInsightsType } from "../lib/types";
+import { type DepartmentInsights as DeptInsightsType } from "../lib/types";
 
 export default function DepartmentInsights() {
   const { user } = useAuth();

@@ -1,3 +1,11 @@
+"""The question pipeline.
+
+    guard -> permission filter (SQL) -> hybrid retrieval -> exact table maths
+    or grounded generation -> claim verification -> audit
+
+Also re-checks old answers against the user's current access before showing
+them again, and keeps a simple per-user rate limit.
+"""
 import logging
 import re
 import time
@@ -301,7 +309,7 @@ def answer_question(
                 result = ai.answer(question, prose, history)
             except Exception as e:
                 logger.error("AI answering error: %s", e)
-                raise HTTPException(502, "The language model did not respond. Check the model settings.")
+                raise HTTPException(502, "The language model did not respond. Check the model settings.") from e
             valid, dropped = validate_citations(result.get("citations", []), context_ids)
             val_res = validator.validate_answer(question, result, evidence, q_analysis)
             if not val_res.valid and val_res.should_retry:

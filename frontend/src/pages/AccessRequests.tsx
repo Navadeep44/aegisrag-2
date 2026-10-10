@@ -1,17 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  KeyRound,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Shield,
-  FileText,
-  UserCheck,
-  ChevronDown,
-  ArrowRight,
-  UserPlus,
-  Pencil,
-} from "lucide-react";
+import { KeyRound, Pencil } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { KeyRound as KeyRoundIcon } from "lucide-react";
 import { Button } from "../components/ui/Button";
@@ -708,7 +696,7 @@ export default function AccessRequests() {
               onChange={(e) => setReason(e.target.value)}
             />
             <p className="text-[0.7rem] text-muted mt-1">
-              Justifications are logged in the immutable security audit log.
+              Justifications are recorded in the audit log.
             </p>
           </div>
 

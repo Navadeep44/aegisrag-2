@@ -2,12 +2,10 @@ import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import {
   ShieldCheck,
-  ShieldAlert,
   Download,
   Play,
   CheckCircle2,
   XCircle,
-  FileText,
   Search,
   Lock,
   History,

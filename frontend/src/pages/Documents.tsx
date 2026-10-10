@@ -9,13 +9,9 @@ import {
   RefreshCw,
   Trash2,
   AlertTriangle,
-  FileCheck,
-  CheckCircle2,
-  Clock,
   ExternalLink,
   ChevronLeft,
   ChevronRight,
-  MoreVertical,
   UserPlus,
   Layers,
   ZoomIn,
@@ -24,7 +20,6 @@ import {
   Database,
   Heading,
   Check,
-  FileSpreadsheet,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Button } from "../components/ui/Button";
@@ -69,7 +64,6 @@ export default function Documents() {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -97,7 +91,6 @@ export default function Documents() {
 
   // Ingestion job status
   const [jobStatus, setJobStatus] = useState<DocStatus | null>(null);
-  const [jobLoading, setJobLoading] = useState(false);
 
   // Flagged Quarantine Drawer
   const [flaggedDocs, setFlaggedDocs] = useState<FlaggedDoc[]>([]);
@@ -127,8 +120,6 @@ export default function Documents() {
     user?.roles?.includes("department_manager") ||
     user?.roles?.includes("team_lead") ||
     isDocManager;
-  const isHr = user?.roles?.includes("hr");
-  const isAuditor = user?.roles?.includes("security_auditor");
 
   const load = () => {
     api<Doc[]>("/documents")
@@ -225,11 +216,9 @@ export default function Documents() {
   // Load job status when opening processing tab
   useEffect(() => {
     if (selectedDoc && docDrawerTab === "processing") {
-      setJobLoading(true);
       api<DocStatus>(`/documents/${selectedDoc.id}/status`)
         .then(setJobStatus)
-        .catch(() => {})
-        .finally(() => setJobLoading(false));
+        .catch(() => {});
     }
   }, [selectedDoc, docDrawerTab]);
 

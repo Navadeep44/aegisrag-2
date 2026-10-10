@@ -1,3 +1,7 @@
+"""Passwords and sessions. Passwords use PBKDF2-SHA256 (100k rounds). The JWT
+carries only the user id; roles and clearance are re-read from the database on
+every request so a revoked role takes effect on the next call.
+"""
 import hashlib
 import hmac
 import secrets
@@ -54,7 +58,7 @@ def current_user(
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
     except jwt.PyJWTError:
-        raise HTTPException(401, "Session is invalid or expired. Sign in again.")
+        raise HTTPException(401, "Session is invalid or expired. Sign in again.") from None
     user = db.get(User, payload.get("sub"))
     if not user or not user.active or user.status == "deactivated":
         raise HTTPException(401, "Account is not active.")

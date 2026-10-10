@@ -385,9 +385,6 @@ export type PlatformSecuritySettings = {
   password_min_length: number;
   allowed_file_types: string[];
   max_upload_size_mb: number;
-  encryption_standard: string;
-  tls_version_minimum: string;
-  audit_immutable: boolean;
   updated_at?: string;
 };
 

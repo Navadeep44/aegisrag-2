@@ -4,7 +4,7 @@ INDUSTRY_CATEGORIES = {
     "healthcare": {
         "id": "healthcare",
         "name": "Hospital & Healthcare Systems",
-        "badge": "HIPAA Compliant",
+        "badge": "Healthcare",
         "tagline": "Clinical protocols, patient charts, surgical guidelines & medical audits",
         "description": "Secure intelligence platform for hospitals, health networks, and clinical research facilities.",
         "icon": "HeartPulse",

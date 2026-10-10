@@ -1,3 +1,6 @@
+"""Audit log writer. Events store ids and decisions only, never question or
+document text, so the log itself cannot leak content.
+"""
 import uuid
 from sqlalchemy.orm import Session
 

@@ -4,13 +4,10 @@ import {
   FileText,
   ChevronRight,
   ShieldCheck,
-  Sparkles,
   BookOpen,
   Copy,
   Check,
-  Table,
   Layers,
-  Info,
   Calculator,
 } from "lucide-react";
 import type { Citation } from "../../lib/types";

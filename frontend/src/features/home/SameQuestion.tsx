@@ -1,17 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Calculator,
-  CheckCircle2,
-  SearchX,
-  ShieldCheck,
-  Lock,
-  Eye,
-  EyeOff,
-  User,
-  Sparkles,
-  ArrowRight,
-} from "lucide-react";
+import { Calculator, CheckCircle2, SearchX, ShieldCheck } from "lucide-react";
 
 interface PersonaData {
   id: string;

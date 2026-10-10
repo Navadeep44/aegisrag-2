@@ -1,16 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
-  Building2,
-  Mail,
-  Lock,
-  User as UserIcon,
-  Globe,
   Upload,
-  CheckCircle2,
-  Sparkles,
-  ShieldCheck,
   HeartPulse,
   Landmark,
   Scale,
@@ -33,7 +25,7 @@ const CATEGORIES = [
   {
     id: "healthcare",
     name: "Hospital & Healthcare",
-    badge: "HIPAA Compliant",
+    badge: "Healthcare",
     icon: HeartPulse,
     roles: [
       { name: "Chief Medical Officer", clearance: "Restricted" },

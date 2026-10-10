@@ -1,5 +1,3 @@
-import json
-import pytest
 from sqlalchemy import select
 from app.models import Document, DocumentAccess, Tenant, User
 from app.authorization import can_read
@@ -322,7 +320,7 @@ def test_platform_super_admin_global_security_settings(client, login):
     # 1. Super admin reads settings
     sec_res = client.get("/api/platform/security-settings", headers=super_admin_token)
     assert sec_res.status_code == 200
-    assert sec_res.json()["mfa_enforced"] is True
+    assert sec_res.json()["mfa_enforced"] is False  # no MFA in this build, so the policy must not claim it
 
     # 2. Super admin updates settings
     update_res = client.patch(

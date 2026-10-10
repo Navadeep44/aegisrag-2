@@ -1,3 +1,10 @@
+"""Turns an uploaded file into searchable, permission-aware chunks.
+
+validate -> extract (PDF text/tables, OCR for scans and images, one record per
+table row) -> remove instruction-like text -> chunk -> embed -> store.
+Runs as a background task; failures mark the document as failed, never crash
+the worker.
+"""
 import hashlib
 import io
 import re
@@ -55,10 +62,11 @@ def validate_upload(filename: str, data: bytes) -> str:
         raise ValueError(f"File content does not match its {ext} extension.")
     if kind in ("text", "database"):
         try:
-            if b"\x00" in data[:4096]:
-                raise ValueError
-        except ValueError:
-            raise ValueError("Text and database records must be valid UTF-8.")
+            data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise ValueError("Text and database records must be valid UTF-8.") from None
+        if b"\x00" in data[:4096]:
+            raise ValueError("Text and database records must not contain binary data.")
     return kind
 
 

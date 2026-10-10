@@ -18,7 +18,6 @@ export default function TenantSettings() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<"settings" | "billing" | "admins">("settings");
-  const [tenant, setTenant] = useState<TenantInfo | null>(null);
   const [usage, setUsage] = useState<TenantUsage | null>(null);
   const [billing, setBilling] = useState<TenantBilling | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -57,7 +56,6 @@ export default function TenantSettings() {
   const loadData = () => {
     api<TenantInfo>("/tenant/settings")
       .then((t) => {
-        setTenant(t);
         setName(t.name);
         setLogoUrl(t.logo_url || "");
         setWebsite(t.website || "");
@@ -126,7 +124,6 @@ export default function TenantSettings() {
           retention_days: Number(retentionDays),
         },
       });
-      setTenant(updated);
       setInitialState({
         name: updated.name,
         logoUrl: updated.logo_url || "",

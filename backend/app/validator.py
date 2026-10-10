@@ -89,7 +89,7 @@ def validate_answer(
     if is_section_locate:
         # Answer must specify a section name/number, NOT list the child items
         has_section_ref = bool(re.search(r"\b(section\s*#?\d+|chapter\s*#?\d+|part\s*#?\d+)\b", answer_text, re.IGNORECASE))
-        if not has_section_ref and any(f"section" in e.get("text", "").lower() for e in evidence):
+        if not has_section_ref and any("section" in e.get("text", "").lower() for e in evidence):
             return ValidationResult(
                 valid=False,
                 reason="Section location query did not return a section reference.",

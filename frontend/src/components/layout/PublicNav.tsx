@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, Menu, X, Shield, Sparkles } from "lucide-react";
+import { ArrowRight, Menu, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { Logo } from "../brand/Logo";
 

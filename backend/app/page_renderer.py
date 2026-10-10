@@ -1,5 +1,5 @@
 """
-High-fidelity page renderer for Eyes Only.
+Renders preview images of document pages (PDF pages, spreadsheet sheets, text) for the source viewer.
 Generates optical PNG page previews for all file types: PDF, images, XLSX spreadsheets, TXT/MD, CSV, and fallback chunks.
 """
 from pathlib import Path

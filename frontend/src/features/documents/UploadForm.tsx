@@ -289,7 +289,6 @@ export function UploadForm({
 
           <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
             {selectedFiles.map((item) => {
-              const isPdf = item.type === "pdf";
               const sizeKb = (item.file.size / 1024).toFixed(1);
 
               return (
@@ -556,7 +555,7 @@ export function UploadForm({
             className="overflow-hidden pt-2"
           >
             <div className="rounded-2xl border border-line bg-surface-subtle p-4">
-              <DocumentWorkflowExplainer compact showHeading={false} />
+              <DocumentWorkflowExplainer showHeading={false} />
             </div>
           </motion.div>
         )}

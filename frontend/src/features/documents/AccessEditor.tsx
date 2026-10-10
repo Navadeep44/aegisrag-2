@@ -1,7 +1,7 @@
-import { useState } from "react";
+
 import { ClearancePill } from "../../components/ui/StatusPill";
 import { LEVELS, type Department, type Doc, type Grant, type Role, type User } from "../../lib/types";
-import { Users, User as UserIcon, Building2, Shield, Plus, X } from "lucide-react";
+import { Users, User as UserIcon, Building2, Shield, X } from "lucide-react";
 
 interface AccessEditorProps {
   doc: Doc;

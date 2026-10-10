@@ -1,3 +1,7 @@
+"""Hybrid search over the chunks a user may read: dense vectors plus BM25,
+fused with reciprocal rank fusion. The permission clause is part of every SQL
+statement here, so restricted chunks are never loaded or ranked.
+"""
 import math
 import re
 import time
@@ -64,11 +68,10 @@ def singularize(word: str) -> str:
 
 @dataclass
 class GenericQuestionModel:
-    """Production Generic Question Model for Universal RAG.
-    
-    Derives structured intent, open-ended entity types, scopes, filters,
-    and aggregations from arbitrary user queries across all domains and file types.
-    """
+    """What a question asks for, parsed with rules (no model call): intent
+    (lookup, list, count, aggregate, compare, section navigation), the entity
+    type, requested count, scope and filters. Retrieval uses it to widen top-k
+    for list/aggregate questions and to prefer chunks with actual items."""
     intent: str  # "LOOKUP" | "LIST" | "COMPLETE_LIST" | "COUNT" | "AGGREGATION" | "COMPARE" | "SECTION_NAV" | "SECTION_LOCATE"
     entity_type: str | None = None
     requested_attributes: list[str] = field(default_factory=list)
@@ -350,7 +353,6 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
         for syn in ai.SYNONYMS.get(w, []):
             expanded_wanted.add(ai.stem(syn))
 
-    import math
 
     # BM25 over the permitted chunks only (k1=1.2, b=0.75), on query terms plus synonyms.
     docs_tokens = {}
@@ -405,11 +407,7 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
 
         # Structural Section & Clause Scope Boost
         if sec_scope or clause_scope:
-            if sec_scope and sec_scope in sec_h_lower:
-                score += 15.0
-            elif clause_scope and (clause_scope in sec_h_lower or f"clause {clause_scope}" in text.lower() or f"{clause_scope} " in sec_h_lower):
-                score += 15.0
-            elif sec_scope and ("introduction" in sec_scope and ("0.1" in sec_h_lower or "0.2" in sec_h_lower or "introduction" in sec_h_lower)):
+            if sec_scope and sec_scope in sec_h_lower or clause_scope and (clause_scope in sec_h_lower or f"clause {clause_scope}" in text.lower() or f"{clause_scope} " in sec_h_lower) or sec_scope and ("introduction" in sec_scope and ("0.1" in sec_h_lower or "0.2" in sec_h_lower or "introduction" in sec_h_lower)):
                 score += 15.0
 
         # Boost if section heading contains query terms
@@ -419,7 +417,7 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
             if h_matches:
                 score += sum(3.0 * idf_map.get(t, 1.0) for t in h_matches)
 
-        # Substantive vs Structural Reranking (Master Prompt Rules 13, 23 & 37)
+        # Prefer chunks that contain the requested items over headings and tables of contents
         if is_items and target_ent:
             synonyms = ai.SYNONYMS.get(target_ent, [])
             if target_ent in sec_h_lower or any(syn in sec_h_lower for syn in synonyms):
@@ -506,11 +504,7 @@ def search(db: Session, user: User, query: str, top_k: int | None = None,
         ).all()
         for cid, head, pnum in chunk_heads:
             h_low = (head or "").lower()
-            if target_sec and target_sec in h_low:
-                scores[cid] += 0.10
-            elif target_clause and (target_clause in h_low or f"clause {target_clause}" in h_low):
-                scores[cid] += 0.10
-            elif target_sec == "introduction" and ("0.1" in h_low or "0.2" in h_low or pnum == 5):
+            if target_sec and target_sec in h_low or target_clause and (target_clause in h_low or f"clause {target_clause}" in h_low) or target_sec == "introduction" and ("0.1" in h_low or "0.2" in h_low or pnum == 5):
                 scores[cid] += 0.10
 
     best = sorted(scores, key=scores.get, reverse=True)[:top_k]

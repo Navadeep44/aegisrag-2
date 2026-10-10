@@ -1,14 +1,14 @@
-"""Real-time WebSocket manager for Eyes Only.
+"""Pushes small change notices (document added, access changed, request decided)
+to the browser over WebSocket so open pages refresh without polling.
 
-Broadcasts live updates (document ingestion status changes, new uploads,
-access request changes, security test updates) to connected clients
-in the relevant tenant so the UI updates instantly without manual browser refresh.
+Messages carry ids and event types only, never document text, and are sent
+only to sockets of the same tenant.
 """
 import asyncio
 import json
 import logging
 from typing import Any
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +19,12 @@ class ConnectionManager:
         self.active_connections: dict[str, set[WebSocket]] = {}
         # socket -> tenant_id
         self.socket_tenant: dict[WebSocket, str] = {}
+        # The server's event loop. Sockets belong to it, so sends from worker
+        # threads (sync endpoints) must be scheduled onto it.
+        self.loop: asyncio.AbstractEventLoop | None = None
 
     async def connect(self, websocket: WebSocket, tenant_id: str):
+        self.loop = asyncio.get_running_loop()
         await websocket.accept()
         if tenant_id not in self.active_connections:
             self.active_connections[tenant_id] = set()
@@ -53,22 +57,15 @@ class ConnectionManager:
         for ws in dead:
             self.disconnect(ws)
 
-    def broadcast_sync(self, tenant_id: str, message: dict[str, Any]):
-        """Safe synchronous wrapper to broadcast from background tasks or synchronous endpoints."""
+    def broadcast_sync(self, tenant_id: str, message: dict[str, Any]) -> None:
+        """Broadcast from synchronous code. Best effort: a notice that cannot be
+        delivered is dropped, it never fails the request that triggered it."""
+        if self.loop is None or self.loop.is_closed() or tenant_id not in self.active_connections:
+            return
         try:
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop and loop.is_running():
-                asyncio.run_coroutine_threadsafe(self.broadcast_tenant(tenant_id, message), loop)
-            else:
-                new_loop = asyncio.new_event_loop()
-                new_loop.run_until_complete(self.broadcast_tenant(tenant_id, message))
-                new_loop.close()
-        except Exception as e:
-            logger.debug("broadcast_sync exception: %s", e)
+            asyncio.run_coroutine_threadsafe(self.broadcast_tenant(tenant_id, message), self.loop)
+        except RuntimeError as e:
+            logger.debug("broadcast_sync skipped: %s", e)
 
 
 manager = ConnectionManager()

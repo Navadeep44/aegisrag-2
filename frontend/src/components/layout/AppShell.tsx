@@ -11,20 +11,18 @@ import {
   Settings,
   SlidersHorizontal,
   ShieldCheck,
-  Cpu,
   User as UserIcon,
   LogOut,
   Menu,
   X,
   ChevronDown,
-  ShieldAlert,
   Globe,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useWebSocketEvent } from "../../context/WebSocketContext";
 import { api } from "../../lib/api";
-import { ClearancePill, RolePill } from "../ui/StatusPill";
-import { LenisProvider, useLenisContext } from "../motion/LenisProvider";
+import { ClearancePill } from "../ui/StatusPill";
+import { LenisProvider } from "../motion/LenisProvider";
 import { ToastProvider } from "../ui/Toast";
 import { PageTransition } from "../motion/PageTransition";
 import { Logo } from "../brand/Logo";
@@ -104,7 +102,6 @@ export function AppShell() {
   const isPlatformAdmin = user.is_platform_admin || roles.includes("platform_super_admin");
   const isOwner = roles.includes("organization_owner");
   const isIamAdmin = roles.includes("iam_admin");
-  const isDocManager = roles.includes("document_manager");
   const isAuditor = roles.includes("security_auditor");
   const isDeptManager = roles.includes("department_manager");
   const isTeamLead = roles.includes("team_lead");
@@ -164,8 +161,6 @@ export function AppShell() {
     .slice(0, 2)
     .join("")
     .toUpperCase();
-
-  const primaryRole = roles[0] || "employee";
 
   const tone = ["from-level-0 to-level-0/40", "from-level-1 to-accent", "from-level-2 to-amber-500", "from-level-3 to-rose-500"][user.clearance] || "from-accent to-ai";
 

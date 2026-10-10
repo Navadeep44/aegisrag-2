@@ -12,7 +12,6 @@ Every query that touches documents goes through readable_clause(); every query
 that touches chunks or records goes through readable_chunk_clause(), which adds
 the row/section-level rule on top.
 """
-from datetime import datetime, timezone
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 

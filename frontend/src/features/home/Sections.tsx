@@ -2,21 +2,13 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
-  Calculator,
   Database,
   FileSearch,
   FileSpreadsheet,
   FileText,
-  Fingerprint,
   Image as ImageIcon,
-  Lock,
   ScanLine,
-  Search,
   ShieldCheck,
-  Sparkles,
-  CheckCircle2,
-  type LucideIcon,
-  ShieldAlert,
 } from "lucide-react";
 import { DocumentWorkflowExplainer } from "../documents/DocumentWorkflowExplainer";
 
@@ -93,7 +85,7 @@ export function Modalities() {
         </h2>
         <p className="mx-auto mt-3 max-w-2xl text-base text-muted">
           No matter how your enterprise data lives, Eyes Only extracts, verifies, and indexes it
-          with cryptographic security isolation.
+          with each tenant kept separate.
         </p>
       </div>
 

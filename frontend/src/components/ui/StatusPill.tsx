@@ -25,7 +25,7 @@ export function StatusPill({ status, size = "sm", percent, stage }: StatusPillPr
     if (norm === "abstained") {
       label = "No source";
     } else if (norm === "processing") {
-      label = percent !== undefined ? `Processing ${percent}%` : "Processing";
+      label = [stage ? `Processing · ${stage}` : "Processing", percent !== undefined ? `${percent}%` : ""].filter(Boolean).join(" ");
     } else {
       label = status;
     }

@@ -1,4 +1,3 @@
-import io
 import pytest
 from fastapi import HTTPException
 from app.api import validate_business_email

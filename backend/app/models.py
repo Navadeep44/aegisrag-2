@@ -1,3 +1,6 @@
+"""Database tables. Access is decided from Document + DocumentAccess
+(document level) and ChunkAccess (row/section level); see authorization.py.
+"""
 import uuid
 from datetime import datetime, timezone
 

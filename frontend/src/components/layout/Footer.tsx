@@ -1,4 +1,4 @@
-import { LogIn, Lock, ShieldCheck, Heart, Sparkles } from "lucide-react";
+import { LogIn, Lock, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Logo } from "../brand/Logo";
 

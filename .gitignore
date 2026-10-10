@@ -8,3 +8,7 @@ dist/
 backend/reports/latest.json
 backend/demo_documents/
 data/
+
+# Local tool state (editor/agent configs, not part of the app)
+.claude/
+.claude-flow/

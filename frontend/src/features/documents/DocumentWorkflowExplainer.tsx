@@ -2,20 +2,13 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
-  ScanLine,
   ShieldAlert,
-  Database,
   Lock,
-  Search,
   Sparkles,
   ShieldCheck,
   CheckCircle2,
-  ArrowRight,
   Layers,
   Cpu,
-  Fingerprint,
-  FileSpreadsheet,
-  AlertTriangle,
 } from "lucide-react";
 
 export interface WorkflowStage {
@@ -65,7 +58,7 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
     id: "sanitize",
     stepNumber: "02",
     title: "Security Sanitization",
-    shortDesc: "Aggressive prompt injection scrubbing and cryptographic tenant namespace isolation.",
+    shortDesc: "Instruction-like text is removed and every chunk is tagged with its tenant.",
     icon: ShieldAlert,
     badge: "Adversarial Defense",
     color: "text-deny",
@@ -156,10 +149,8 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
 ];
 
 export function DocumentWorkflowExplainer({
-  compact = false,
   showHeading = true,
 }: {
-  compact?: boolean;
   showHeading?: boolean;
 }) {
   const [activeStageId, setActiveStageId] = useState<string>("ingest");
@@ -202,7 +193,7 @@ export function DocumentWorkflowExplainer({
 
       {/* Stepper Navigation */}
       <div className="mb-8 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-        {WORKFLOW_STAGES.map((stage, idx) => {
+        {WORKFLOW_STAGES.map((stage) => {
           const Icon = stage.icon;
           const isActive = stage.id === activeStageId;
           return (

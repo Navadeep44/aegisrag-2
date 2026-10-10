@@ -17,12 +17,11 @@ Enforces:
 14. Citation precision: Every cited chunk ID strictly exists in retrieved evidence.
 15. Unanswerable: Correct abstention when information is genuinely absent.
 """
-import pytest
 from sqlalchemy import select
 
-from app import ai, chat, ingestion, retrieval, validator
-from app.authorization import readable_clause, readable_document_ids
-from app.models import Chunk, Document, Tenant, User
+from app import ai, ingestion, retrieval, validator
+from app.authorization import readable_clause
+from app.models import User
 
 
 # Reference compendium chunks for Apex Dental Hospital
@@ -254,7 +253,7 @@ def test_11_unauthorized_data(db):
     """Test 11: Unauthorized chunks never enter candidate retrieval or ranking."""
     # Employee cannot read restricted documents
     employee = db.execute(select(User).where(User.email == "employee@acme.test")).scalar_one()
-    allowed = readable_clause(employee)
+    readable_clause(employee)
     hits = retrieval.search(db, employee, "What was our annual revenue?")
     # Revenue report is restricted; employee must receive zero revenue chunks
     context_titles = {h.document.title for h in hits}

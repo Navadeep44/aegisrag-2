@@ -18,12 +18,10 @@ export function prefersReducedMotion(): boolean {
 }
 
 /**
- * Creates and configures smooth scrolling synchronized with GSAP.
- * Avoids intercepting and breaking native mouse wheel events.
+ * Smooth scrolling is turned off: native scrolling is smoother on trackpads and
+ * keeps the browser's own scroll behaviour. Kept as a hook point for LenisProvider.
  */
-export function createLenis(scroller?: HTMLElement | null): Lenis | null {
-  // Let the browser manage hardware-accelerated mouse wheel scrolling natively
-  // to ensure smooth, responsive scrolling across all devices and pages.
+export function createLenis(_scroller?: HTMLElement | null): Lenis | null {
   return null;
 }
 

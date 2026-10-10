@@ -6,10 +6,6 @@ import {
   CheckCircle2,
   Lock,
   XCircle,
-  ShieldCheck,
-  Sparkles,
-  Database,
-  FileText,
   ChevronRight,
 } from "lucide-react";
 import { LogoMark } from "../../components/brand/Logo";

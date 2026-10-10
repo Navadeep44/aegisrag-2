@@ -1,31 +1,22 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Users,
-  Link as LinkIcon,
   Copy,
   ExternalLink,
   Plus,
-  Shield,
   Check,
   UserPlus,
-  KeyRound,
-  ShieldCheck,
-  Building2,
-  Lock,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Globe as GlobeIcon } from "lucide-react";
-import { SectionCard } from "../components/ui/SectionCard";
+
 import { inputClass } from "../components/ui/field";
 import { useToast } from "../components/ui/Toast";
-import { useAuth } from "../context/AuthContext";
 import { api, post } from "../lib/api";
 import type { RoleHubItem } from "../lib/types";
 
 export default function RolePortalsHub() {
-  const { user } = useAuth();
   const { showToast } = useToast();
 
   const [roles, setRoles] = useState<RoleHubItem[]>([]);

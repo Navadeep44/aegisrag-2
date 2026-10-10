@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Building2, Shield, Lock, Mail, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
+import { Shield, Lock, Mail, ArrowRight, AlertCircle } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { inputClass } from "../components/ui/field";
 import { Notice } from "../components/ui/Notice";

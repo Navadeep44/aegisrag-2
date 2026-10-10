@@ -1,17 +1,13 @@
-import pytest
 from pathlib import Path
-from app.models import Document, Chunk
-from app.ingestion import _extract_pdf, process_document, doc_dir
-from app.db import SessionLocal
+from app.models import Document
+from app.ingestion import _extract_pdf, doc_dir
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
 
 def _find_file(filename: str) -> Path:
-    p = Path(filename)
-    if p.exists():
-        return p
-    root_p = Path(__file__).resolve().parent.parent.parent / filename
-    if root_p.exists():
-        return root_p
-    return p
+    """Sample PDFs used by these tests live in tests/fixtures/."""
+    return FIXTURES / filename
 
 
 def test_extract_unbookmarked_pdf_multi_headings():

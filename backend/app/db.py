@@ -1,3 +1,6 @@
+"""Database engine and session. SQLite by default, PostgreSQL + pgvector when
+DATABASE_URL is set. init_db() creates tables and adds any new columns.
+"""
 from pathlib import Path
 
 from sqlalchemy import create_engine, text

@@ -9,7 +9,6 @@ import json
 import logging
 import math
 import re
-import time
 import zlib
 
 import httpx
@@ -19,12 +18,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 STOP = set(
-    "a an and are as at be by did do does for from has have how i in is it its of on or our "
-    "that the their there this to was we were what when where which who why will with you your "
-    "many much can could should would me my us they them tell about give show detail details "
-    "information regarding describe describing described explain please know find want like get got let "
-    "mention mentioned state stated list listed define defined specify specified given name named "
-    "core main major key dr mr mrs ms prof".split()
+    ["a", "an", "and", "are", "as", "at", "be", "by", "did", "do", "does", "for", "from", "has", "have", "how", "i", "in", "is", "it", "its", "of", "on", "or", "our", "that", "the", "their", "there", "this", "to", "was", "we", "were", "what", "when", "where", "which", "who", "why", "will", "with", "you", "your", "many", "much", "can", "could", "should", "would", "me", "my", "us", "they", "them", "tell", "about", "give", "show", "detail", "details", "information", "regarding", "describe", "describing", "described", "explain", "please", "know", "find", "want", "like", "get", "got", "let", "mention", "mentioned", "state", "stated", "list", "listed", "define", "defined", "specify", "specified", "given", "name", "named", "core", "main", "major", "key", "dr", "mr", "mrs", "ms", "prof"]
 )
 
 NUM_WORDS: dict[str, list[str]] = {
@@ -314,7 +308,7 @@ def _parse_records_from_evidence(evidence: list[dict]) -> list[dict]:
 
             normalized_headers = [re.sub(r"[^\w]+", "_", h.lower()).strip("_") for h in raw_headers]
 
-            for idx, row_ln in enumerate(tbl_lines[data_start:], start=1):
+            for row_ln in tbl_lines[data_start:]:
                 if re.match(r"^\|(\s*:?-+:?\s*\|)+$", row_ln):
                     continue
                 vals = [c.strip() for c in row_ln.strip("|").split("|")]
@@ -386,150 +380,10 @@ def _answer_structured_records(question: str, records: list[dict], evidence: lis
         return None
 
     q_lower = question.lower().strip()
-    # 0. Prevent table matching for autoclave, sensor QA, explanatory prose, and general document prose/principles/clauses
-    is_autoclave_or_sterilizer = bool(re.search(r"\b(gravity|pre-vacuum|vacuum|autoclave|sterilizer|sterilization cycle|exposure time|121|132)\b", q_lower))
-    is_sensor_qa = bool(re.search(r"\b(intraoral sensor|image-quality|acceptance test|quality audit|calibration)\b", q_lower))
-    is_prose_or_principle = bool(re.search(r"\b(principle|principles|introduction|foreword|preface|clause|sub-clause|requirement|requirements|philosophy|mandate)\b", q_lower)) and not any(k in q_lower for k in ["table", "csv", "patient", "doctor", "inventory", "supply", "glove", "pouch", "metric"])
-    is_explanatory = bool(re.search(r"\b(why|explain|describe|relate|relationship|difference between)\b", q_lower)) or bool(re.search(r"\bhow\s+(does|do|can|is|are|will|would)\b", q_lower))
-    if is_autoclave_or_sterilizer or is_sensor_qa or is_prose_or_principle or is_explanatory:
+    # "Why ..." / "how does ..." questions are about prose, not table lookups.
+    if re.search(r"\b(why|explain|describe|relate|relationship|difference between)\b", q_lower) or \
+            re.search(r"\bhow\s+(does|do|can|is|are|will|would)\b", q_lower):
         return None
-
-    # Specific Target Handlers
-    # 1. In Progress Patients (Test 13)
-    if "in progress" in q_lower and ("patient" in q_lower or "status" in q_lower or "treatment" in q_lower):
-        in_prog_recs = []
-        seen_pids = set()
-        for r in records:
-            st = str(r["fields"].get("status", "")).strip().lower()
-            pid = str(r["fields"].get("patient_id", "")).strip()
-            if st == "in progress" and pid.startswith("APX-") and pid not in seen_pids:
-                seen_pids.add(pid)
-                in_prog_recs.append(r)
-        if in_prog_recs:
-            in_prog_recs.sort(key=lambda r: r["fields"].get("patient_id", ""))
-            lines = [
-                f"**Direct Answer**\nThere are exactly **{len(in_prog_recs)} patients** whose treatment status is **In Progress**:\n",
-                "| Patient ID | Patient Name | Outstanding Balance | Procedure |",
-                "|---|---|---|---|"
-            ]
-            for r in in_prog_recs:
-                f = r["fields"]
-                lines.append(f"| {f.get('patient_id')} | {f.get('patient_name')} | {f.get('balance')} | {f.get('procedure')} |")
-            lines.append("\n**Key Details & Breakdown**")
-            for r in in_prog_recs:
-                f = r["fields"]
-                lines.append(f"- **{f.get('patient_name')}** ({f.get('patient_id')}): Outstanding Balance: **{f.get('balance')}**")
-            cids = list(dict.fromkeys(r["chunk_id"] for r in in_prog_recs))
-            return {"answerable": True, "answer": "\n".join(lines), "citations": cids}
-
-    # 2. Registry Summary (Test 10)
-    if "registry summary" in q_lower or ("treatment fee" in q_lower and "outstanding balance" in q_lower and "average" in q_lower):
-        summary_recs = [r for r in records if "registry summary" in r["fields"] or "registry_summary" in r["fields"]]
-        cids = list(dict.fromkeys(r["chunk_id"] for r in summary_recs)) if summary_recs else [evidence[0]["id"]]
-        lines = [
-            "**Direct Answer**\nAccording to the Registry Summary in the master records, the financial totals and averages are:\n- **Total Treatment Fees**: **$39,020.00**\n- **Total Amount Paid**: **$28,569.00**\n- **Outstanding Balance**: **$10,451.00**\n- **Average Treatment Fee**: **$1,560.80**\n",
-            "**Key Details & Breakdown**\n| Metric | Value |",
-            "|---|---|",
-            "| Patient Records | 25 |",
-            "| Total Treatment Fees | $39,020.00 |",
-            "| Total Amount Paid | $28,569.00 |",
-            "| Outstanding Balance | $10,451.00 |",
-            "| Average Treatment Fee | $1,560.80 |",
-            "\n**Calculation & Methodology**\n- Outstanding Balance: $39,020.00 - $28,569.00 = $10,451.00\n- Average Treatment Fee: $39,020.00 ÷ 25 patient records = $1,560.80"
-        ]
-        return {"answerable": True, "answer": "\n".join(lines), "citations": cids}
-
-    # 3. Operational Metrics (Test 12)
-    if ("satisfaction" in q_lower and "cbct" in q_lower) or ("uptime" in q_lower and "appointments" in q_lower):
-        metric_recs = [r for r in records if "metric" in r["fields"]]
-        cids = list(dict.fromkeys(r["chunk_id"] for r in metric_recs)) if metric_recs else [evidence[0]["id"]]
-        lines = [
-            "**Direct Answer**\nDuring the reported audit cycle (July 2025 – June 2026):\n- **Patient Satisfaction Rating**: **4.72 / 5.0**\n- **CBCT 3D X-Ray System Uptime**: **99.18%**\n- **Total Patient Appointments Conducted**: **12,500**\n",
-            "**Key Details & Breakdown**\n| Operational Metric | Reported Result |",
-            "|---|---|",
-            "| Patient Satisfaction Rating | 4.72 / 5.0 |",
-            "| CBCT 3D X-Ray System Equipment Uptime | 99.18% |",
-            "| Total Patient Appointments Conducted | 12,500 |",
-            "| Overall Infection Rate | 0.14% |",
-            "| Audit Cycle | July 2025 – June 2026 |"
-        ]
-        return {"answerable": True, "answer": "\n".join(lines), "citations": cids}
-
-    # 4. Compare Nitrile Gloves and Sterilization Pouches (Test 14)
-    if "compare" in q_lower and "nitrile" in q_lower and "pouch" in q_lower:
-        comp_recs = [r for r in records if "nitrile" in str(r["fields"]).lower() or "sterilization pouch" in str(r["fields"]).lower()]
-        cids = list(dict.fromkeys(r["chunk_id"] for r in comp_recs)) if comp_recs else [evidence[0]["id"]]
-        lines = [
-            "**Direct Answer**\nComparison of stock and minimum reorder levels:\n- **Nitrile Examination Gloves**: **26 in stock**, minimum reorder level **12** (Unit cost: $15.90)\n- **Sterilization Pouch Packs**: **57 in stock**, minimum reorder level **19** (Unit cost: $17.80)\n",
-            "**Key Details & Breakdown**\n| Item Description | Item Code | Category | Current Stock | Minimum Reorder Level | Unit Cost | Supplier |",
-            "|---|---|---|---|---|---|---|",
-            "| Nitrile Examination Gloves Box #006 | ADS-PPE-0006 | PPE | 26 | 12 | $15.90 | BioDent Logistics |",
-            "| Sterilization Pouch Pack #007 | ADS-STE-0007 | Sterilization Supply | 57 | 19 | $17.80 | SurgiSource |"
-        ]
-        return {"answerable": True, "answer": "\n".join(lines), "citations": cids}
-
-    # 5. Nitrile Gloves (Test 11)
-    if "nitrile" in q_lower and ("glove" in q_lower or "unit cost" in q_lower or "reorder" in q_lower or "how many" in q_lower):
-        cids = [e["id"] for e in evidence if "ADS-PPE-0006" in e.get("text", "")]
-        return {
-            "answerable": True,
-            "answer": "**Direct Answer**\nThere are **26 boxes** of nitrile examination gloves in stock, with a minimum reorder level of **12** and a unit cost of **$15.90**.\n\n**Key Details & Breakdown**\n- **Item Code**: ADS-PPE-0006\n- **Item Description**: Nitrile Examination Gloves Box #006\n- **Category**: PPE\n- **Current Stock**: 26 boxes\n- **Minimum Reorder Level**: 12 boxes\n- **Unit Cost**: $15.90\n- **Supplier**: BioDent Logistics",
-            "citations": cids[:1] if cids else [evidence[0]["id"]],
-        }
-
-    # 6. ADS-IMP-0002 (Test 8)
-    if "ads-imp-0002" in q_lower:
-        cids = [e["id"] for e in evidence if "ADS-IMP-0002" in e.get("text", "")]
-        return {
-            "answerable": True,
-            "answer": "**Direct Answer**\nItem code **ADS-IMP-0002** corresponds to **Titanium Implant Fixture #002**, with **82 units** currently recorded in stock and a minimum reorder level of **24 units**.\n\n**Key Details & Breakdown**\n- **Item Code**: ADS-IMP-0002\n- **Item Description**: Titanium Implant Fixture #002\n- **Category**: Implant Component\n- **Current Stock**: 82\n- **Minimum Reorder Level**: 24\n- **Unit Cost**: $8.30\n- **Supplier**: OrthoCore Distribution",
-            "citations": cids[:1] if cids else [evidence[0]["id"]],
-        }
-
-    # 7. APX-2026-0006 unpaid balance (Test 7)
-    if "apx-2026-0006" in q_lower:
-        cids = [e["id"] for e in evidence if "APX-2026-0006" in e.get("text", "")]
-        return {
-            "answerable": True,
-            "answer": "**Direct Answer**\nFor patient **APX-2026-0006** (Rohan Sethi), the unpaid balance is **$228.00**.\n\n**Key Details & Breakdown**\n- **Patient ID**: APX-2026-0006\n- **Patient Name**: Rohan Sethi\n- **Procedure**: Composite Restoration\n- **Total Fee**: $380.00\n- **Amount Paid**: $152.00\n- **Outstanding Balance (Unpaid)**: $228.00\n- **Treatment Status**: In Progress\n\n**Calculation & Methodology**\n- Balance = Total Fee ($380.00) - Amount Paid ($152.00) = **$228.00**",
-            "citations": cids[:1] if cids else [evidence[0]["id"]],
-        }
-
-    # 8. APX-2026-0002 (Test 3)
-    if "apx-2026-0002" in q_lower:
-        cids = [e["id"] for e in evidence if "APX-2026-0002" in e.get("text", "")]
-        return {
-            "answerable": True,
-            "answer": "**Direct Answer**\nFor patient **APX-2026-0002** (Esha Sethi):\n- **Procedure**: Titanium Dental Implant\n- **Total Fee**: **$3,100.00**\n- **Amount Paid**: **$775.00**\n- **Outstanding Balance**: **$2,325.00**\n\n**Key Details & Breakdown**\n- **Patient ID**: APX-2026-0002\n- **Patient Name**: Esha Sethi\n- **Attending Specialist**: Dr. Anika Rao\n- **Procedure**: Titanium Dental Implant\n- **Tooth #**: 36\n- **Total Fee**: $3,100.00\n- **Amount Paid**: $775.00\n- **Outstanding Balance**: $2,325.00\n- **Status**: In Progress",
-            "citations": cids[:1] if cids else [evidence[0]["id"]],
-        }
-
-    # 9. APX-2025-0003 (Test 15)
-    if "apx-2025-0003" in q_lower:
-        cids = [e["id"] for e in evidence if "APX-2025-0003" in e.get("text", "")]
-        return {
-            "answerable": True,
-            "answer": "**Direct Answer**\nFor patient **APX-2025-0003** (Kabir Trivedi):\n- **Total Fee**: **$950.00**\n- **Amount Paid**: **$0.00**\n- **Remaining Balance**: **$950.00**\n\n**Key Details & Breakdown**\n- **Patient ID**: APX-2025-0003\n- **Patient Name**: Kabir Trivedi\n- **Procedure**: Wisdom Tooth Surgical Extraction\n- **Tooth #**: 38\n- **Fee**: $950.00\n- **Paid**: $0.00\n- **Remaining Balance**: $950.00\n- **Status**: Scheduled",
-            "citations": cids[:1] if cids else [evidence[0]["id"]],
-        }
-
-    # 10. DOC-0003 (Tests 2 & 6)
-    if "doc-0003" in q_lower or ("orthodontic" in q_lower and ("specialist" in q_lower or "doctor" in q_lower)):
-        cids = [e["id"] for e in evidence if "DOC-0003" in e.get("text", "")]
-        return {
-            "answerable": True,
-            "answer": "**Direct Answer**\nDoctor ID **DOC-0003** is **Dr. Sana Menon**, whose specialty is **Orthodontics**.\n\n**Key Details & Breakdown**\n- **Doctor ID**: DOC-0003\n- **Full Name**: Dr. Sana Menon\n- **Department / Specialty**: Orthodontics\n- **License Number**: ADS-2025-0003\n- **Experience**: 20 Years\n- **Monthly Base Salary**: $20,500.00\n- **Assigned Operatory**: OR-03",
-            "citations": cids[:1] if cids else [evidence[0]["id"]],
-        }
-
-    # 11. Overall infection rate (Test 4)
-    if "infection rate" in q_lower:
-        cids = [e["id"] for e in evidence if "0.14%" in e.get("text", "")]
-        return {
-            "answerable": True,
-            "answer": "**Direct Answer**\nThe overall infection rate during the reported audit cycle is **0.14%**.\n\n**Key Details & Breakdown**\n- **Metric**: Overall infection rate\n- **Cycle Result**: 0.14%\n- **Audit Cycle**: July 2025 – June 2026\n- **Total Patient Appointments**: 12,500",
-            "citations": cids[:1] if cids else [evidence[0]["id"]],
-        }
 
     raw_words = re.findall(r"[a-z0-9]+", q_lower)
     q_stems = [stem(w) for w in raw_words]
@@ -931,7 +785,7 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
         for ev in evidence:
             text = ev.get("text", "")
             title = ev.get("title", "")
-            m_sec = re.search(rf"(Section\s+\d+:\s+[^.\n]+)", text, re.IGNORECASE)
+            m_sec = re.search(r"(Section\s+\d+:\s+[^.\n]+)", text, re.IGNORECASE)
             sec_name = None
             if m_sec and target_ent and target_ent in m_sec.group(1).lower():
                 sec_name = m_sec.group(1).strip()
@@ -954,7 +808,7 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
         title = ev.get("title", "")
         chunk_text = ev.get("text", "")
 
-        # Master Prompt Rule 13 & 37: Discard pure Table of Contents/Overview when specific items are requested
+        # When specific items are requested, skip chunks that are only a table of contents
         is_pure_toc = bool(
             re.search(r"(table of contents|document outline|overview of sections)", chunk_text, re.IGNORECASE)
             or (chunk_text.count("Section ") >= 3 and not re.search(rf"\b({target_ent}\s*#?\d+|\d+\.\s+[A-Za-z]|Record\s*#?\d+|[-•*]\s+{target_ent})\b", chunk_text, re.IGNORECASE if target_ent else re.IGNORECASE))
@@ -1065,7 +919,7 @@ def _local_answer(question: str, evidence: list[dict]) -> dict:
             )
             is_header_label = is_top_s_header or (is_summary_query and is_first_line_header)
 
-            # Master Prompt Rule 13: Filter out lines that are merely headers of other sections when items are requested
+            # When items are requested, skip lines that are only headings of other sections
             substantive_in_chunk = []
             for s in sentences:
                 s_clean = s.strip()
@@ -1394,51 +1248,13 @@ def describe_image(png: bytes) -> str:
 
 
 def answer(question: str, evidence: list[dict], history: list[dict] | None = None) -> dict:
-    """Legacy single-string answer: {"answerable", "answer", "citations"}.
-    The chat pipeline uses answering.generate() for Gemini; this path serves the
-    OpenAI-compatible provider and the offline local engine."""
+    """Single-string answer: {"answerable", "answer", "citations"}.
+
+    The chat pipeline calls answering.generate() when Gemini is configured; this
+    function serves the OpenAI-compatible provider and the offline local engine.
+    """
     if not evidence:
         return {"answerable": False, "answer": "", "citations": []}
-
-    q_lower = question.lower().strip()
-
-    # Immediate grounded responses for security refusal or specific unlisted patient history
-    if (
-        re.search(r"\b(ignore|bypass|override)\b.*\b(restriction|access|authorization|security|permission|policy)\b", q_lower)
-        or "ignore all access restrictions" in q_lower
-        or "not appear" in q_lower
-        or "25-patient subset" in q_lower
-        or "history of a patient whose record does not" in q_lower
-    ):
-        local_cand = _local_answer(question, evidence)
-        if local_cand.get("answerable"):
-            return local_cand
-
-    gemini_key = (settings.gemini_api_key or settings.google_api_key or "").strip()
-
-    # 1. Google AI Studio (Gemini) Primary Execution
-    if settings.ai_provider == "gemini" and gemini_key:
-        if gemini_key:
-            try:
-                res = _gemini_answer(question, evidence, history or [])
-                if res and res.get("answerable") and res.get("answer"):
-                    return res
-                elif res and not res.get("answerable"):
-                    # Before giving up, verify if local deterministic engine can extract structured records
-                    local_cand = _local_answer(question, evidence)
-                    if local_cand.get("answerable"):
-                        return local_cand
-                    return res
-            except Exception as exc:
-                logger.warning(
-                    "Google AI Studio (Gemini) API request failed (%s). "
-                    "Seamlessly falling back to local deterministic RAG engine.",
-                    exc,
-                )
-        else:
-            logger.info("AI provider configured for Gemini but no GEMINI_API_KEY found; falling back to local engine.")
-
-
     if settings.ai_provider == "openai" and settings.ai_api_key:
         try:
             return parse_model_json(_chat(build_messages(question, evidence, history or [])))

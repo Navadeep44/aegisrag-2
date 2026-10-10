@@ -3,9 +3,6 @@ import {
   Building2,
   Shield,
   FileCode2,
-  Users,
-  FileText,
-  Sparkles,
   Plus,
   Headphones,
   Search,
@@ -41,7 +38,6 @@ export default function PlatformAdmin() {
   const { showToast } = useToast();
   const [metrics, setMetrics] = useState<PlatformMetrics | null>(null);
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
-  const [securitySettings, setSecuritySettings] = useState<PlatformSecuritySettings | null>(null);
   const [platformAuditLogs, setPlatformAuditLogs] = useState<PlatformAuditItem[]>([]);
   const [activeTab, setActiveTab] = useState<"tenants" | "security" | "audit">("tenants");
   const [tenantSearch, setTenantSearch] = useState("");
@@ -66,7 +62,7 @@ export default function PlatformAdmin() {
   const [selectedAuditLog, setSelectedAuditLog] = useState<PlatformAuditItem | null>(null);
 
   // Security settings form state
-  const [mfaEnforced, setMfaEnforced] = useState(true);
+  const [mfaEnforced, setMfaEnforced] = useState(false);
   const [sessionTimeout, setSessionTimeout] = useState(60);
   const [maxFailedLogins, setMaxFailedLogins] = useState(5);
   const [passwordMinLength, setPasswordMinLength] = useState(12);
@@ -85,7 +81,6 @@ export default function PlatformAdmin() {
 
     api<PlatformSecuritySettings>("/platform/security-settings")
       .then((sec) => {
-        setSecuritySettings(sec);
         setMfaEnforced(sec.mfa_enforced);
         setSessionTimeout(sec.session_timeout_minutes);
         setMaxFailedLogins(sec.max_failed_logins ?? 5);
@@ -181,7 +176,7 @@ export default function PlatformAdmin() {
         .filter(Boolean)
         .map((s) => (s.startsWith(".") ? s : `.${s}`));
 
-      const updated = await patch<PlatformSecuritySettings>("/platform/security-settings", {
+      await patch<PlatformSecuritySettings>("/platform/security-settings", {
         mfa_enforced: mfaEnforced,
         session_timeout_minutes: Number(sessionTimeout),
         max_failed_logins: Number(maxFailedLogins),
@@ -189,7 +184,6 @@ export default function PlatformAdmin() {
         allowed_file_types: fileTypesArray,
         max_upload_size_mb: Number(maxUploadSize),
       });
-      setSecuritySettings(updated);
       showToast("Global security settings enforced platform-wide.", "success");
     } catch (err) {
       showToast((err as Error).message, "error");
@@ -325,7 +319,7 @@ export default function PlatformAdmin() {
       </div>
 
       <Notice tone="info">
-        <strong>Super Admin Zero-Trust Boundary:</strong> Platform Super Admins manage infrastructure and policies but cannot inspect tenant document text without explicit authorization grants and clearance.
+        <strong>No content access:</strong> platform admins manage tenants and settings but cannot read tenant documents unless granted access like any other user.
       </Notice>
 
       {/* KPI Metrics Strip */}
@@ -423,8 +417,8 @@ export default function PlatformAdmin() {
       {activeTab === "security" && (
         <div className="space-y-6">
           <SectionCard
-            title="Global Security Policies"
-            subtitle="Configure cluster-wide authentication thresholds, file restrictions, and session security constraints."
+            title="Platform policy"
+            subtitle="Stored policy values for the deployment team. This build does not enforce them yet; uploads use the server limit and sign-in uses 8-hour tokens."
           >
             <form onSubmit={handleSaveSecuritySettings} className="space-y-6">
               <div className="grid gap-6 md:grid-cols-2">
@@ -439,7 +433,7 @@ export default function PlatformAdmin() {
                       />
                       <div>
                         <span className="text-sm font-semibold text-ink">
-                          Enforce Multi-Factor Authentication (MFA)
+                          Require multi-factor authentication (planned)
                         </span>
                         <p className="mt-0.5 text-xs text-muted">
                           Require all tenant administrators and privileged roles to provide MFA tokens.
@@ -532,28 +526,6 @@ export default function PlatformAdmin() {
                       Max size per document ingested into tenant RAG vector store.
                     </p>
                   </div>
-                </div>
-              </div>
-
-              {/* Cryptographic Standards */}
-              <div className="grid gap-4 sm:grid-cols-3 pt-2">
-                <div className="rounded-xl border border-line bg-surface-subtle p-4">
-                  <p className="text-[0.7rem] uppercase tracking-wider font-mono text-muted">At-Rest Encryption</p>
-                  <p className="mt-1 text-sm font-semibold text-ink">
-                    {securitySettings?.encryption_standard || "AES-256-GCM"}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-line bg-surface-subtle p-4">
-                  <p className="text-[0.7rem] uppercase tracking-wider font-mono text-muted">In-Transit Protocol</p>
-                  <p className="mt-1 text-sm font-semibold text-ink">
-                    {securitySettings?.tls_version_minimum || "TLS 1.3"}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-line bg-surface-subtle p-4">
-                  <p className="text-[0.7rem] uppercase tracking-wider font-mono text-muted">Audit Trail Integrity</p>
-                  <p className="mt-1 text-sm font-semibold text-ink">
-                    {securitySettings?.audit_immutable ? "Append-Only (Immutable)" : "Enabled"}
-                  </p>
                 </div>
               </div>
 

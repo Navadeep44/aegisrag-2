@@ -1,3 +1,7 @@
+"""HTTP API. Every route is grouped by area (auth, users, documents, chat,
+simulator, audit, settings). Routes stay thin: access rules live in
+authorization.py, the question pipeline in chat.py, file handling in ingestion.py.
+"""
 import csv
 import io
 import json
@@ -15,14 +19,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app import audit, chat, ingestion, page_renderer, retrieval, row_security
+from app import audit, chat, ingestion, ocr, page_renderer, retrieval, row_security
 from app.ws import manager
 from app.auth import (
     current_user,
     get_user_from_token,
     hash_password,
     make_token,
-    require_admin,
     require_any_permission,
     require_permission,
     require_platform_admin,
@@ -47,7 +50,6 @@ from app.models import (
     Tenant,
     User,
     iso,
-    new_id,
     now,
 )
 
@@ -149,8 +151,6 @@ class PlatformSecuritySettingsIn(BaseModel):
     password_min_length: int | None = None
     allowed_file_types: list[str] | None = None
     max_upload_size_mb: int | None = None
-    encryption_standard: str | None = None
-    tls_version_minimum: str | None = None
 
 
 class HROnboardIn(BaseModel):
@@ -413,7 +413,7 @@ def login(body: LoginIn, db: Session = Depends(get_db)) -> dict:
     return {"token": make_token(user), "user": user_out(user)}
 
 
-# ---------- SaaS Onboarding & Dedicated Role Portals ----------
+# ---------- company sign-up and role portals ----------
 
 DISALLOWED_CONSUMER_DOMAINS = {
     "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "rocketmail.com",
@@ -850,7 +850,7 @@ def me(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dic
     return user_out(user, dept_map)
 
 
-# ---------- IAM / User management ----------
+# ---------- users ----------
 
 @router.get("/users")
 def list_users(
@@ -976,7 +976,7 @@ def user_effective_access(
     }
 
 
-# ---------- Roles management ----------
+# ---------- roles ----------
 
 @router.get("/roles")
 def list_roles(
@@ -1066,7 +1066,7 @@ def update_role(
     }
 
 
-# ---------- Access Requests (Section 3.4, 3.10, 6.C, 9) ----------
+# ---------- access requests ----------
 
 @router.post("/access-requests")
 def create_access_request(
@@ -1107,10 +1107,7 @@ def create_access_request(
         resource_id=req.resource_id,
         target_user_id=req.target_user_id,
     )
-    try:
-        manager.broadcast_sync(user.tenant_id, {"type": "access_request.created", "id": req.id, "requester_id": req.requester_id})
-    except Exception:
-        pass
+    manager.broadcast_sync(user.tenant_id, {"type": "access_request.created", "id": req.id, "requester_id": req.requester_id})
     return {
         "id": req.id,
         "requester_id": req.requester_id,
@@ -1277,16 +1274,13 @@ def decide_access_request(
         resource_type=req.resource_type,
         resource_id=req.resource_id,
     )
-    try:
-        manager.broadcast_sync(approver.tenant_id, {
-            "type": "access_request.decided",
-            "id": req.id,
-            "decision": req.decision,
-            "resource_id": req.resource_id,
-            "target_user_id": grant_target_id,
-        })
-    except Exception:
-        pass
+    manager.broadcast_sync(approver.tenant_id, {
+        "type": "access_request.decided",
+        "id": req.id,
+        "decision": req.decision,
+        "resource_id": req.resource_id,
+        "target_user_id": grant_target_id,
+    })
     return {
         "id": req.id,
         "decision": req.decision,
@@ -1379,7 +1373,7 @@ def upload_document(
         kind = ingestion.validate_upload(filename, data)
         parsed = [Grant(**g) for g in json.loads(grants)]
     except (ValueError, TypeError) as error:
-        raise HTTPException(400, str(error) or "Upload is not valid.")
+        raise HTTPException(400, str(error) or "Upload is not valid.") from error
     checksum = ingestion.compute_checksum(data)
     clean_grant_objs = _clean_grants(db, actor.tenant_id, parsed)
     for g in clean_grant_objs:
@@ -1401,10 +1395,7 @@ def upload_document(
     ingestion.store_original(doc, data)
     background.add_task(ingestion.process_document, doc.id)
     audit.log(db, actor.tenant_id, actor.id, "document.upload", "allowed", document_id=doc.id)
-    try:
-        manager.broadcast_sync(actor.tenant_id, {"type": "document.created", "document_id": doc.id, "title": doc.title})
-    except Exception:
-        pass
+    manager.broadcast_sync(actor.tenant_id, {"type": "document.created", "document_id": doc.id, "title": doc.title})
     return doc_out(doc, True, _labels(db, actor.tenant_id))
 
 
@@ -1433,10 +1424,7 @@ def update_access(
         grants=[[g.subject_type, g.subject_id] for g in doc.access],
         classification=doc.classification,
     )
-    try:
-        manager.broadcast_sync(actor.tenant_id, {"type": "document.access_changed", "document_id": doc.id})
-    except Exception:
-        pass
+    manager.broadcast_sync(actor.tenant_id, {"type": "document.access_changed", "document_id": doc.id})
     db.refresh(doc)
     return doc_out(doc, True, _labels(db, actor.tenant_id))
 
@@ -1588,10 +1576,7 @@ def delete_document(
     db.delete(doc)
     db.commit()
     audit.log(db, actor.tenant_id, actor.id, "document.delete", "allowed", document_id=document_id)
-    try:
-        manager.broadcast_sync(actor.tenant_id, {"type": "document.deleted", "document_id": document_id})
-    except Exception:
-        pass
+    manager.broadcast_sync(actor.tenant_id, {"type": "document.deleted", "document_id": document_id})
     return {"deleted": document_id}
 
 
@@ -1740,7 +1725,7 @@ def page_highlights(
                         found_boxes = []
 
                         # Pass 1: exact substring match
-                        for box, text, conf in res:
+                        for box, text, _conf in res:
                             t_lower = text.lower().strip()
                             if len(t_lower) >= 3 and (t_lower in q_lower or q_lower in t_lower):
                                 x0 = min(pt[0] for pt in box)
@@ -1751,7 +1736,7 @@ def page_highlights(
 
                         # Pass 2: if few exact matches, match meaningful keyword tokens
                         if len(found_boxes) < 2 and q_words:
-                            for box, text, conf in res:
+                            for box, text, _conf in res:
                                 t_words = {w.lower() for w in re.findall(r"\b\w+\b", text) if len(w) > 2 and w.lower() not in stopwords}
                                 overlap = q_words & t_words
                                 if overlap and (len(overlap) >= 2 or len(overlap) / max(len(t_words), 1) >= 0.5):
@@ -1884,7 +1869,6 @@ def get_chat_suggestions(
         select(Document).where(Document.id.in_(readable_ids), Document.status == "active")
     ).scalars().all() if readable_ids else []
 
-    user_roles = [r.name.lower() for r in user.roles]
     role_labels = [r.name for r in user.roles] or ["Employee"]
     primary_role_label = role_labels[0]
 
@@ -1909,60 +1893,31 @@ def get_chat_suggestions(
             seen.add(q)
             suggestions.append(q)
 
-    # 1. Inspect accessible document titles and generate specific queries
+    # Build suggestions from what each readable document actually contains:
+    # numeric columns for tables, headings for prose, the title otherwise.
     for d in docs:
-        t_low = d.title.lower()
-        fn_low = d.filename.lower()
-
-        # Dental Clinic / Healthcare documents
-        if any(k in t_low or k in fn_low for k in ["dental", "clinic", "patient", "apex", "doctor", "steril"]):
-            if any("doctor" in r or "physician" in r or "dentist" in r for r in user_roles):
-                add_q("Which doctor is listed under DOC-0003 and what is their specialty?")
-                add_q("For patient APX-2026-0002, what is the procedure, fee, and outstanding balance?")
-                add_q("What were the clinical procedure outcomes and audit metrics reported?")
-            elif any("nurse" in r or "hygienist" in r or "assistant" in r for r in user_roles):
-                add_q("What is the minimum exposure time for wrapped instruments in a gravity sterilizer at 121°C?")
-                add_q("Which inventory item has code ADS-IMP-0002 and what is its reorder level?")
-                add_q("What was the overall infection rate during the reported audit cycle?")
-            else:
-                add_q("What is the minimum exposure time for wrapped instruments at 121°C?")
-                add_q("What is the outstanding balance for patient APX-2026-0006?")
-                add_q("Compare the gravity-displacement and pre-vacuum sterilization cycles.")
-
-        # ISO 27001 / Security / Compliance standards
-        elif any(k in t_low or k in fn_low for k in ["iso", "27001", "security", "isms", "compliance"]):
-            add_q("What are the three main information security principles mentioned in the introduction?")
-            add_q("What are the requirements for understanding the organization according to clause 4.1?")
-            add_q("What are the requirements for the information security policy in clause 5.2?")
-            add_q("What control governs privileged utility programs in Annex A?")
-
-        # Financial / Invoice / Revenue documents
-        elif any(k in t_low or k in fn_low for k in ["invoice", "revenue", "financial", "billing", "salary", "expense"]):
-            if any("finance" in r or "accounting" in r or "admin" in r for r in user_roles):
-                add_q(f"What is the total billed amount in {d.title}?")
-                add_q(f"What are the payment terms and due dates in {d.title}?")
-            else:
-                add_q(f"What financial metrics are summarized in {d.title}?")
-
-        # HR / Policy / Handbook
-        elif any(k in t_low or k in fn_low for k in ["leave", "policy", "handbook", "hr", "benefit", "onboard"]):
-            add_q("What are the key policy guidelines and requirements?")
-            add_q("What are the standard operating procedures outlined in the document?")
-
-        # Generic Document Section Grounded Questions
-        sections = d.sections_metadata or []
-        for s in sections[:2]:
-            h = s.get("heading")
-            if h and len(h) < 50 and not any(k in h.lower() for k in ["table of contents", "outline", "cover"]):
-                clean_h = re.sub(r"^[0-9\.\-\s]+", "", h).strip()
-                if clean_h:
-                    add_q(f"What are the requirements specified under {clean_h}?")
+        schema = d.data_schema or {}
+        if d.kind in ("database", "xlsx") and schema.get("columns"):
+            numeric = [c for c, t in (schema.get("column_types") or {}).items() if t == "number"]
+            add_q(f"How many records are in {d.title}?")
+            if numeric:
+                add_q(f"What is the total {numeric[0]} in {d.title}?")
+            continue
+        headings = [
+            re.sub(r"^[0-9.\-\s]+", "", s.get("heading", "")).strip()
+            for s in (d.sections_metadata or [])
+        ]
+        headings = [h for h in headings if h and len(h) < 50 and h.lower() != d.title.lower()
+                    and not any(k in h.lower() for k in ("table of contents", "outline", "cover"))]
+        if headings:
+            add_q(f"What does {d.title} say about {headings[0]}?")
+        else:
+            add_q(f"What are the key points in {d.title}?")
 
     # Fallback / General questions grounded in accessible document titles
     if len(suggestions) < 3:
         for d in docs:
-            add_q(f"What are the key guidelines documented in {d.title}?")
-            add_q(f"Summarize the main provisions and requirements of {d.title}.")
+            add_q(f"Summarize {d.title}.")
 
     return {
         "suggestions": suggestions[:4],
@@ -2197,11 +2152,11 @@ def run_security_tests(
             capture_output=True,
         )
     except subprocess.TimeoutExpired:
-        raise HTTPException(504, "The test run took too long.")
+        raise HTTPException(504, "The test run took too long.") from None
     return security_tests(admin)
 
 
-# ---------- Organization Owner / Tenant Settings (Section 3.2) ----------
+# ---------- tenant settings ----------
 
 @router.get("/tenant/settings")
 def get_tenant_settings(
@@ -2276,7 +2231,7 @@ def get_tenant_usage(
     }
 
 
-# ---------- Platform Super Admin (Section 3.1) ----------
+# ---------- platform super admin ----------
 
 @router.get("/platform/tenants")
 def list_platform_tenants(
@@ -2402,27 +2357,28 @@ def privileged_support_access(
     }
 
 
-# ---------- Platform Global Security Settings (Section 3.1) ----------
+# ---------- platform security settings ----------
 
-PLATFORM_SECURITY_FILE = BACKEND_ROOT / "data" / "platform_security.json"
+def _platform_security_file() -> Path:
+    # Kept next to stored documents so a test run (temporary storage dir) never
+    # touches the live settings.
+    return Path(settings.file_storage_dir) / "platform_security.json"
 
 
 def _get_platform_security() -> dict:
     default_sec = {
-        "mfa_enforced": True,
+        # Stored policy only: nothing below is enforced by this build yet.
+        "mfa_enforced": False,
         "session_timeout_minutes": 60,
         "max_failed_logins": 5,
         "password_min_length": 12,
         "allowed_file_types": [".pdf", ".docx", ".xlsx", ".txt", ".csv"],
         "max_upload_size_mb": 25,
-        "encryption_standard": "AES-256-GCM",
-        "tls_version_minimum": "TLS 1.3",
-        "audit_immutable": True,
         "updated_at": iso(datetime.now(timezone.utc)),
     }
-    if PLATFORM_SECURITY_FILE.is_file():
+    if _platform_security_file().is_file():
         try:
-            return {**default_sec, **json.loads(PLATFORM_SECURITY_FILE.read_text())}
+            return {**default_sec, **json.loads(_platform_security_file().read_text())}
         except Exception:
             pass
     return default_sec
@@ -2445,13 +2401,13 @@ def update_platform_security_settings(
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     current.update(updates)
     current["updated_at"] = iso(datetime.now(timezone.utc))
-    PLATFORM_SECURITY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PLATFORM_SECURITY_FILE.write_text(json.dumps(current, indent=2))
+    _platform_security_file().parent.mkdir(parents=True, exist_ok=True)
+    _platform_security_file().write_text(json.dumps(current, indent=2))
     audit.log(db, admin.tenant_id, admin.id, "platform.security_settings_update", "allowed", updates=updates)
     return current
 
 
-# ---------- Departments (Section 3.3, 3.4, 4) ----------
+# ---------- departments ----------
 
 @router.get("/departments")
 def list_departments(
@@ -2500,7 +2456,7 @@ def create_department(
     return {"id": dept.id, "name": dept.name, "member_count": 0}
 
 
-# ---------- Organization Owner: Billing & Admins (Section 3.2) ----------
+# ---------- billing & admins ----------
 
 @router.get("/tenant/billing")
 def get_tenant_billing(
@@ -2572,7 +2528,7 @@ def manage_tenant_admin(
     return user_out(target_user)
 
 
-# ---------- Department Insights (Section 3.5, Role 8) ----------
+# ---------- department insights ----------
 
 @router.get("/department/insights")
 def get_department_insights(
@@ -2686,7 +2642,7 @@ def get_department_insights(
     }
 
 
-# ---------- HR Admin: Employee Management (Section 3.4, Role 5) ----------
+# ---------- hr admin: employee management ----------
 
 @router.get("/hr/employees")
 def list_hr_employees(
@@ -2790,7 +2746,7 @@ def hr_offboard_employee(
     return user_out(target_user)
 
 
-# ---------- Dashboard Stats, Audit Export & Flagged Document Quarantine ----------
+# ---------- dashboard stats and flagged-document review ----------
 
 class ReviewFlaggedIn(BaseModel):
     decision: str  # approve | purge

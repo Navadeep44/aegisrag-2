@@ -1,5 +1,4 @@
-import pytest
-from app.models import AccessRequest, AuditEvent, Document, User
+from app.models import AccessRequest
 
 ADMIN = "admin@acme.test"
 EMPLOYEE = "employee@acme.test"

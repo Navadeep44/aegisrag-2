@@ -1,6 +1,4 @@
 import json
-from pathlib import Path
-from sqlalchemy import select
 import pytest
 
 from app import chat, ingestion

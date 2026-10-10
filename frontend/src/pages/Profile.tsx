@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { User, Shield, KeyRound, LogOut, Search, Building2, Mail, CheckCircle2 } from "lucide-react";
+import { LogOut, Search, CheckCircle2 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { UserRound as UserRoundIcon } from "lucide-react";
 import { SectionCard } from "../components/ui/SectionCard";
