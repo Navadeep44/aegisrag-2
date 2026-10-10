@@ -28,6 +28,20 @@ def make_token(user: User) -> str:
     return jwt.encode({"sub": user.id, "exp": expires}, settings.jwt_secret, algorithm="HS256")
 
 
+def get_user_from_token(db: Session, token: str) -> User | None:
+    """Decodes JWT and loads active user from DB. Returns None if invalid or expired."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+        user = db.get(User, payload.get("sub"))
+        if not user or not user.active or user.status == "deactivated":
+            return None
+        return user
+    except Exception:
+        return None
+
+
 def current_user(
     authorization: str = Header(default=""), db: Session = Depends(get_db)
 ) -> User:

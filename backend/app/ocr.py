@@ -12,17 +12,28 @@ logger = logging.getLogger(__name__)
 _engine = None
 
 
-def _rapid(png: bytes) -> str:
+def get_ocr_engine():
     global _engine
     if not settings.local_ocr:
-        return ""
-    try:
-        if _engine is None:
+        return None
+    if _engine is None:
+        try:
             from rapidocr_onnxruntime import RapidOCR
             _engine = RapidOCR()
-        result, _ = _engine(png)
+        except Exception as exc:
+            logger.info("Local OCR unavailable: %s", exc)
+            return None
+    return _engine
+
+
+def _rapid(png: bytes) -> str:
+    engine = get_ocr_engine()
+    if engine is None:
+        return ""
+    try:
+        result, _ = engine(png)
     except Exception as exc:  # engine missing or image unreadable
-        logger.info("Local OCR unavailable: %s", exc)
+        logger.info("Local OCR processing failed: %s", exc)
         return ""
     if not result:
         return ""

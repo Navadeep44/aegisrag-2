@@ -1,6 +1,6 @@
-# AegisRAG — Product Requirements Document (PRD)
+# Eyes Only — Product Requirements Document (PRD)
 
-**Project Title:** AegisRAG — Enterprise Secure Multimodal Retrieval-Augmented Generation (RAG) with Pre-Retrieval Access Control  
+**Project Title:** Eyes Only — Enterprise Secure Multimodal Retrieval-Augmented Generation (RAG) with Pre-Retrieval Access Control  
 **Version:** 1.0.0  
 **Status:** Active / Production Ready  
 **Target Problem Statement:** PS-01 (Secure Multimodal RAG with Granular Access Control)  
@@ -18,8 +18,8 @@ Modern enterprise Retrieval-Augmented Generation (RAG) systems aggregate large c
 4. **Retroactive Access Leaks:** When an employee transfers departments or loses security clearance, historical chat sessions may still expose cached or replayed sensitive answers.
 5. **Indirect Prompt Injection:** Adversarial instructions embedded inside uploaded enterprise documents can hijack the LLM to exfiltrate cross-departmental secrets.
 
-### 1.2 The AegisRAG Solution
-**AegisRAG** is a secure, multi-tenant multimodal RAG architecture designed from the ground up to enforce **pre-retrieval SQL-level authorization**. Permissions are enforced directly inside the database query before any text or image chunk can be embedded, ranked, or passed to the language model. 
+### 1.2 The Eyes Only Solution
+**Eyes Only** is a secure, multi-tenant multimodal RAG architecture designed from the ground up to enforce **pre-retrieval SQL-level authorization**. Permissions are enforced directly inside the database query before any text or image chunk can be embedded, ranked, or passed to the language model. 
 
 ```
                                     ┌────────────────────────┐

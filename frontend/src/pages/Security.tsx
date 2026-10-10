@@ -73,12 +73,11 @@ export default function Security() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
+    Promise.allSettled([
       api<TestReport>("/security/tests").then(setReport),
       api<AuditEvent[]>(`/audit/events${filter ? `?decision=${filter}` : ""}`).then(setEvents),
       api<UnauthorizedQuery[]>("/audit/unauthorized-queries").then(setUnauthorizedQueries),
     ])
-      .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [filter]);
 
@@ -260,8 +259,8 @@ export default function Security() {
                       <p className="text-xs font-semibold text-ink">{q.user_name}</p>
                       {q.user_email && <p className="text-[0.7rem] text-muted">{q.user_email}</p>}
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {q.user_roles && q.user_roles.length > 0 ? (
-                          q.user_roles.map((r) => (
+                        {(q.user_roles || (q as any).roles || []).length > 0 ? (
+                          (q.user_roles || (q as any).roles || []).map((r: string) => (
                             <span
                               key={r}
                               className="rounded bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 text-[0.65rem] font-mono font-medium"
@@ -331,7 +330,7 @@ export default function Security() {
                     <StatusPill status="abstained" />
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    {q.user_roles.map((r) => (
+                    {(q.user_roles || (q as any).roles || []).map((r: string) => (
                       <span key={r} className="rounded bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 text-[0.65rem] font-mono">
                         {r}
                       </span>

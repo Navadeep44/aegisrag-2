@@ -489,16 +489,26 @@ def _extract_database(doc: Document, path: Path):
 
 
 def _extract_image(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, str]], list[dict], int]:
-    pix = pymupdf.Pixmap(str(path))
-    if pix.alpha or pix.n > 3:
-        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
-    png = pix.tobytes("png")
-    page_image_path(doc, 1).write_bytes(png)
+    try:
+        pix = pymupdf.Pixmap(str(path))
+        if pix.alpha or pix.n > 3:
+            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+        png = pix.tobytes("png")
+        page_image_path(doc, 1).write_bytes(png)
+    except Exception:
+        # Fallback to direct raw bytes
+        raw_data = path.read_bytes()
+        page_image_path(doc, 1).write_bytes(raw_data)
+        png = raw_data
+
     text, engine = ocr.read_image(png)
-    sec_meta = [{"id": "sec_1", "heading": "Image Content", "level": 1, "page": 1, "snippet": text[:150], "allowed_roles": []}]
+    text = (text or "").strip()
     if not text:
-        return [], sec_meta, 1
+        text = f"Visual image document: {doc.title} ({doc.filename}). Image content uploaded and stored."
+        engine = "metadata"
+    sec_meta = [{"id": "sec_1", "heading": "Image Content", "level": 1, "page": 1, "snippet": text[:150], "allowed_roles": []}]
     return [(1, f"image · OCR ({engine})", f"[Text read from image]\n{text}", "Image Content")], sec_meta, 0
+
 
 
 def _extract_xlsx(doc: Document, path: Path):
@@ -618,6 +628,17 @@ def _extract_docx(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, 
     return sections, sections_meta, 0
 
 
+STAGE_PERCENT = {
+    "queued": 15,
+    "validation": 25,
+    "extraction": 50,
+    "sanitization": 75,
+    "embedding": 90,
+    "complete": 100,
+    "failed": 0,
+}
+
+
 def create_or_update_job(
     db, doc: Document, status: str, stage: str, error_code: str | None = None
 ) -> IngestionJob:
@@ -639,7 +660,23 @@ def create_or_update_job(
         job.error_code = error_code
         job.updated_at = now()
     db.commit()
+
+    percent = STAGE_PERCENT.get(stage, 50 if status == "processing" else 100)
+    try:
+        from app.ws import manager
+        manager.broadcast_sync(doc.tenant_id, {
+            "type": "document.status_changed",
+            "document_id": doc.id,
+            "status": doc.status,
+            "job_status": status,
+            "stage": stage,
+            "percent": percent,
+        })
+    except Exception:
+        pass
+
     return job
+
 
 
 def process_document(document_id: str) -> None:

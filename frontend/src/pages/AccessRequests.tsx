@@ -23,6 +23,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { StatusPill } from "../components/ui/StatusPill";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
+import { useWebSocketEvent } from "../context/WebSocketContext";
 import { api, patch, post, put } from "../lib/api";
 import type { AccessRequest, Doc, User } from "../lib/types";
 import { hasPermission } from "../lib/types";
@@ -104,6 +105,12 @@ export default function AccessRequests() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Real-time WebSocket updates - instant refresh on any status or access change
+  useWebSocketEvent("access_request.created", () => loadData());
+  useWebSocketEvent("access_request.decided", () => loadData());
+  useWebSocketEvent("document.created", () => loadData());
+  useWebSocketEvent("document.deleted", () => loadData());
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

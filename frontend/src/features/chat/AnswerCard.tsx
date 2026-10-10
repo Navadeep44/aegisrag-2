@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import {
-  Activity, AlertTriangle, Calculator, CheckCircle2, CircleDashed, EyeOff, Lock, SearchX, ShieldCheck, ShieldX,
+  Activity, AlertTriangle, ArrowRight, Calculator, CheckCircle2, CircleDashed, EyeOff, KeyRound, Lock, SearchX, ShieldCheck, ShieldX,
 } from "lucide-react";
 import type { Citation, Claim, Message } from "../../lib/types";
 import { kindStyle } from "../../lib/kinds";
@@ -195,17 +195,22 @@ export function AnswerCard({
   message,
   selected,
   onSelect,
+  onRequestAccess,
 }: {
   message: Message;
   selected: Citation | null;
   onSelect: (c: Citation) => void;
+  onRequestAccess?: (resource?: { id: string; title: string; classification?: number } | null) => void;
 }) {
   const [showTrace, setShowTrace] = useState(false);
   const [isTyping, setIsTyping] = useState(() => Boolean(message.isNew));
   const [activeClaimIndex, setActiveClaimIndex] = useState(() => (message.isNew ? -1 : 999));
   const meta = message.meta;
+  const suggested = message.suggested_resource || meta?.suggested_resource;
   const citations = message.citations ?? [];
   const number = new Map(citations.map((c, i) => [c.chunk_id, i + 1]));
+  const scopedDocIds = message.selected_document_ids || meta?.selected_document_ids;
+  const scopedCount = scopedDocIds ? scopedDocIds.length : 0;
 
   const fullContent = message.content || meta?.headline || "";
   const isMarkdownContent =
@@ -272,10 +277,43 @@ export function AnswerCard({
 
   if (message.status === "refused") {
     return (
-      <Shell tone="deny" icon={ShieldX} label="Blocked" onClick={skipAnimation}>
+      <Shell tone="deny" icon={ShieldX} label="Blocked" scopedCount={scopedCount} onClick={skipAnimation}>
         <p className="text-sm text-ink-light">
           {message.isNew && isTyping ? displayedText : message.content}
         </p>
+        {onRequestAccess && (
+          <div className="mt-3.5 rounded-xl border border-line bg-surface p-3.5 shadow-2xs">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-ink flex items-center gap-1.5">
+                  <KeyRound className="h-3.5 w-3.5 text-deny" />
+                  {suggested ? (
+                    <>
+                      Restricted Resource: <span className="text-deny font-mono font-bold">{suggested.title}</span>
+                    </>
+                  ) : (
+                    "Authorization Required"
+                  )}
+                </p>
+                <p className="text-[11px] text-muted mt-0.5 leading-normal">
+                  {suggested ? (
+                    `Level ${suggested.classification} classification. Submit a request to the document owner.`
+                  ) : (
+                    "You are not cleared for this content. Submit an access request to obtain authorization."
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRequestAccess(suggested || null)}
+                className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl shadow-xs shrink-0 cursor-pointer hover:scale-102 transition-transform"
+              >
+                <span>Request Access</span>
+                <ArrowRight className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        )}
         {meta?.trace && !isTyping && (
           <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="mt-3">
             <PipelineTrace steps={meta.trace.steps} />
@@ -287,13 +325,46 @@ export function AnswerCard({
 
   if (message.status === "abstained") {
     return (
-      <Shell tone="warn" icon={SearchX} label="No authorized source" onClick={skipAnimation}>
+      <Shell tone="warn" icon={SearchX} label="No authorized source" scopedCount={scopedCount} onClick={skipAnimation}>
         <p className="text-sm text-ink-light">
           {message.isNew && isTyping ? displayedText : message.content}
         </p>
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted">
           <Lock className="h-3 w-3" /> Nothing outside your access was searched or shown.
         </p>
+        {onRequestAccess && (
+          <div className="mt-3.5 rounded-xl border border-line bg-surface p-3.5 shadow-2xs">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-ink flex items-center gap-1.5">
+                  <KeyRound className="h-3.5 w-3.5 text-accent" />
+                  {suggested ? (
+                    <>
+                      Restricted Source: <span className="text-accent font-semibold">{suggested.title}</span>
+                    </>
+                  ) : (
+                    "Need Access to Restricted Information?"
+                  )}
+                </p>
+                <p className="text-[11px] text-muted mt-0.5 leading-normal">
+                  {suggested ? (
+                    `Contains information related to your question (Level ${suggested.classification}). Request access to query it.`
+                  ) : (
+                    "Request access grants from document managers to include restricted documents in your search scope."
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRequestAccess(suggested || null)}
+                className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl shadow-xs shrink-0 cursor-pointer hover:scale-102 transition-transform"
+              >
+                <span>Request Access</span>
+                <ArrowRight className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        )}
         {meta?.trace && (
           <TraceToggle open={showTrace} setOpen={setShowTrace} steps={meta.trace.steps} total={meta.trace.total_ms} />
         )}
@@ -309,6 +380,7 @@ export function AnswerCard({
         tone={computed ? "computed" : "allow"}
         icon={computed ? Calculator : ShieldCheck}
         label={computed ? "Computed" : "Grounded"}
+        scopedCount={scopedCount}
         right={meta?.grounding && !isTyping ? <GroundingRing score={meta.grounding.score} /> : null}
         onClick={skipAnimation}
       >
@@ -384,6 +456,7 @@ export function AnswerCard({
       tone={computed ? "computed" : "allow"}
       icon={computed ? Calculator : ShieldCheck}
       label={computed ? "Computed" : "Grounded"}
+      scopedCount={scopedCount}
       right={meta.grounding && !isTyping ? <GroundingRing score={meta.grounding.score} /> : null}
       onClick={skipAnimation}
     >
@@ -571,6 +644,7 @@ function Shell({
   tone,
   icon: Icon,
   label,
+  scopedCount,
   right,
   onClick,
   children,
@@ -578,6 +652,7 @@ function Shell({
   tone: keyof typeof SHELL_TONES;
   icon: typeof ShieldCheck;
   label: string;
+  scopedCount?: number;
   right?: React.ReactNode;
   onClick?: () => void;
   children: React.ReactNode;
@@ -592,9 +667,16 @@ function Shell({
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/40 to-transparent" />
       <div className="mb-3 flex items-center justify-between gap-3">
-        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${SHELL_TONES[tone]}`}>
-          <Icon className="h-3.5 w-3.5" /> {label}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${SHELL_TONES[tone]}`}>
+            <Icon className="h-3.5 w-3.5" /> {label}
+          </span>
+          {Boolean(scopedCount && scopedCount > 0) && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+              Scoped ({scopedCount} {scopedCount === 1 ? "source" : "sources"})
+            </span>
+          )}
+        </div>
         {right}
       </div>
       {children}

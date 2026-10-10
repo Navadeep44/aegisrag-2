@@ -82,7 +82,7 @@ function DocumentScene() {
           <LogoMark className="h-7 w-7" />
         </div>
         <div className="hidden sm:block">
-          <p className="text-xs font-bold text-ink">Aegis Guard Core</p>
+          <p className="text-xs font-bold text-ink">Eyes Only gate</p>
           <p className="font-mono text-[10px] text-accent font-semibold">Active & Enforcing</p>
         </div>
       </motion.div>

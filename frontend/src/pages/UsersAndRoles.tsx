@@ -521,7 +521,7 @@ export default function UsersAndRoles() {
       {!loading && activeTab === "roles" && (
         <div className="space-y-4">
           <p className="text-xs text-muted">
-            Roles bundle fine-grained permission keys. AegisRAG checks permissions centrally at the API and database query level.
+            Roles bundle fine-grained permission keys. Eyes Only checks permissions centrally at the API and database query level.
           </p>
           <div className="grid gap-4 md:grid-cols-2">
             {roles.map((r) => (

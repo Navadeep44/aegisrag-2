@@ -2,11 +2,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  ArrowUp, Calculator, Database, FileText, Fingerprint, History, Image as ImageIcon, Lock, Plus, ScanLine, Search,
-  ShieldCheck, Sparkles, type LucideIcon,
+  ArrowUp, Calculator, Check, ChevronDown, Database, FileText, Fingerprint, History, Image as ImageIcon, KeyRound, Lock, Plus, ScanLine, Search,
+  ShieldCheck, SlidersHorizontal, Sparkles, X, type LucideIcon,
 } from "lucide-react";
 import { LogoMark } from "../components/brand/Logo";
 import { Notice } from "../components/ui/Notice";
+import { Button } from "../components/ui/Button";
+import { useToast } from "../components/ui/Toast";
 import { ClearancePill, RolePill } from "../components/ui/StatusPill";
 import { AnswerCard } from "../features/chat/AnswerCard";
 import { EvidenceViewer } from "../features/chat/EvidenceViewer";
@@ -89,7 +91,7 @@ function Thinking() {
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-ink font-mono">
-                Aegis Engine Active
+                Eyes Only active
               </span>
               <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent">
                 <span className="h-1.5 w-1.5 rounded-full bg-accent animate-ping" />
@@ -146,33 +148,109 @@ function Thinking() {
   );
 }
 
-function AccessLens({ docs, info }: { docs: Doc[]; info: PipelineInfo | null }) {
+function AccessLens({
+  docs,
+  info,
+  selectedDocIds,
+  onToggleDoc,
+  onSelectAll,
+  onClear,
+}: {
+  docs: Doc[];
+  info: PipelineInfo | null;
+  selectedDocIds: string[];
+  onToggleDoc: (id: string) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+}) {
   const readable = docs.filter((d) => d.readable && d.status === "active");
+  const isScoped = selectedDocIds.length > 0;
+
   return (
     <div className="glass flex h-full flex-col gap-4 overflow-y-auto rounded-2xl p-4">
       <div>
-        <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted">
-          <ShieldCheck className="h-3.5 w-3.5 text-allow" /> Your search scope
+        <div className="flex items-center justify-between mb-1">
+          <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted">
+            <ShieldCheck className="h-3.5 w-3.5 text-allow" /> Your search scope
+          </p>
+          {readable.length > 0 && (
+            <div className="flex items-center gap-1 text-[10px]">
+              {isScoped ? (
+                <button
+                  type="button"
+                  onClick={onClear}
+                  className="font-medium text-muted hover:text-accent cursor-pointer"
+                >
+                  Reset all
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onSelectAll}
+                  className="font-medium text-muted hover:text-accent cursor-pointer"
+                >
+                  Select all
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        <p className="display text-3xl text-ink">
+          {isScoped ? selectedDocIds.length : readable.length}
+          <span className="ml-1 text-sm text-muted">
+            {isScoped ? `of ${readable.length} sources` : "sources"}
+          </span>
         </p>
-        <p className="display text-3xl text-ink">{readable.length}<span className="ml-1 text-sm text-muted">sources</span></p>
-        <p className="text-[11px] text-muted">Everything else is filtered out inside the database query.</p>
+        <p className="text-[11px] text-muted">
+          {isScoped
+            ? "Questions are scoped to selected documents only."
+            : "Click any document below to scope questions directly."}
+        </p>
       </div>
+
       <div className="space-y-1.5">
         {readable.map((d) => {
           const k = kindStyle(d.kind, d.note);
           const Icon = k.icon;
+          const isSelected = selectedDocIds.includes(d.id);
           return (
-            <div key={d.id} className="flex items-center gap-2.5 rounded-xl border border-line bg-surface-subtle/50 px-2.5 py-2">
-              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border ${k.tint}`}><Icon className="h-3.5 w-3.5" /></span>
+            <div
+              key={d.id}
+              onClick={() => onToggleDoc(d.id)}
+              className={`flex items-center gap-2.5 rounded-xl border px-2.5 py-2 cursor-pointer transition-all ${
+                isSelected
+                  ? "border-accent/60 bg-accent/15 shadow-2xs"
+                  : isScoped
+                  ? "border-line/60 bg-surface-subtle/30 opacity-60 hover:opacity-100 hover:border-line"
+                  : "border-line bg-surface-subtle/50 hover:border-accent/40 hover:bg-surface-subtle"
+              }`}
+              title={isSelected ? "Selected (click to unselect)" : "Click to scope query to this source"}
+            >
+              <div
+                className={`grid h-4 w-4 place-items-center rounded border transition-colors shrink-0 ${
+                  isSelected
+                    ? "border-accent bg-accent text-white"
+                    : "border-line bg-surface"
+                }`}
+              >
+                {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
+              </div>
+              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border ${k.tint}`}>
+                <Icon className="h-3.5 w-3.5" />
+              </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-xs font-semibold text-ink">{d.title}</span>
                 <span className="text-[10px] text-muted">{k.label}{d.row_policy?.column ? " · row rules" : ""}</span>
               </span>
-              <span className={`h-2 w-2 rounded-full ${LEVEL_DOT[d.classification] ?? "bg-muted"}`} title={`Level ${d.classification}`} />
+              <span
+                className={`h-2 w-2 rounded-full shrink-0 ${LEVEL_DOT[d.classification] ?? "bg-muted"}`}
+                title={`Level ${d.classification}`}
+              />
             </div>
           );
         })}
       </div>
+
       {info && (
         <div className="mt-auto grid grid-cols-2 gap-2 border-t border-line pt-3 text-[10px]">
           <span className="chip justify-center"><Sparkles className="h-3 w-3 text-ai" />{info.chat_model}</span>
@@ -187,6 +265,7 @@ function AccessLens({ docs, info }: { docs: Doc[]; info: PipelineInfo | null }) 
 
 export default function Chat() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -200,6 +279,41 @@ export default function Chat() {
   const [info, setInfo] = useState<PipelineInfo | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Document Selection Scope State
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [showDocPicker, setShowDocPicker] = useState(false);
+  const [docFilterText, setDocFilterText] = useState("");
+
+  const readableDocs = docs.filter((d) => d.readable && d.status === "active");
+  const filteredReadableDocs = readableDocs.filter(
+    (d) =>
+      !docFilterText.trim() ||
+      d.title.toLowerCase().includes(docFilterText.toLowerCase()) ||
+      d.filename.toLowerCase().includes(docFilterText.toLowerCase())
+  );
+
+  const toggleDocSelection = (id: string) => {
+    setSelectedDocIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllDocs = () => {
+    setSelectedDocIds(readableDocs.map((d) => d.id));
+  };
+
+  const clearDocSelection = () => {
+    setSelectedDocIds([]);
+  };
+
+  // Access Request Modal State
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestAccessResource, setRequestAccessResource] = useState<{ id: string; title: string; classification?: number } | null>(null);
+  const [selectedDocId, setSelectedDocId] = useState("");
+  const [requestReason, setRequestReason] = useState("");
+  const [requestSubmitting, setRequestSubmitting] = useState(false);
+  const [lastUserQuestion, setLastUserQuestion] = useState("");
 
   const roles = user?.roles || [];
   const persona = (["finance", "hr", "engineering"].find((r) => roles.includes(r)) ?? "employee") as keyof typeof STARTERS;
@@ -224,18 +338,77 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, busy]);
 
+  const handleOpenRequestAccess = (resource?: { id: string; title: string; classification?: number } | null) => {
+    setRequestAccessResource(resource || null);
+    if (resource) {
+      setSelectedDocId(resource.id);
+    } else {
+      setSelectedDocId("");
+    }
+    setRequestReason(lastUserQuestion ? `Access needed to answer question: "${lastUserQuestion}"` : "Access requested for restricted business documents.");
+    setShowRequestModal(true);
+  };
+
+  const handleSubmitAccessRequest = async () => {
+    const targetId = requestAccessResource?.id || selectedDocId;
+    if (!targetId) {
+      showToast("Please choose a restricted document to request.", "error");
+      return;
+    }
+    if (requestReason.trim().length < 3) {
+      showToast("Please provide a business justification.", "error");
+      return;
+    }
+    try {
+      setRequestSubmitting(true);
+      await post("/access-requests", {
+        resource_type: "document",
+        resource_id: targetId,
+        reason: requestReason.trim(),
+      });
+      showToast("Access request submitted! Document approvers have been notified.", "success");
+      setShowRequestModal(false);
+    } catch (err) {
+      showToast((err as Error).message, "error");
+    } finally {
+      setRequestSubmitting(false);
+    }
+  };
+
   async function ask(text: string) {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
+    setLastUserQuestion(trimmed);
     setError("");
     setBusy(true);
     setQuestion("");
-    setMessages((m) => [...m, { role: "user", content: trimmed, status: "", citations: [] }]);
+    const currentScope = selectedDocIds.length > 0 ? [...selectedDocIds] : null;
+    setMessages((m) => [
+      ...m,
+      {
+        role: "user",
+        content: trimmed,
+        status: "",
+        citations: [],
+        selected_document_ids: currentScope,
+      },
+    ]);
     try {
-      const reply = await post<ChatReply>("/chat/query", { question: trimmed, conversation_id: conversationId });
+      const reply = await post<ChatReply>("/chat/query", {
+        question: trimmed,
+        conversation_id: conversationId,
+        document_ids: currentScope || undefined,
+      });
       setConversationId(reply.conversation_id);
       setMessages((m) => [...m, {
-        role: "assistant", content: reply.answer, status: reply.status, citations: reply.citations, meta: reply.meta, isNew: true,
+        role: "assistant",
+        content: reply.answer,
+        status: reply.status,
+        citations: reply.citations,
+        suggested_resource: reply.suggested_resource,
+        selected_document_ids: reply.meta?.selected_document_ids || currentScope,
+        meta: reply.meta,
+        isNew: true,
       }]);
       if (reply.citations[0]) setSelected(reply.citations[0]);
       loadSessions();
@@ -276,7 +449,7 @@ export default function Chat() {
             <Sparkles className="h-5 w-5 text-ai" />
           </div>
           <div>
-            <h1 className="display text-xl text-ink">Ask Aegis</h1>
+            <h1 className="display text-xl text-ink">Ask Eyes Only</h1>
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
               <ClearancePill clearance={user?.clearance ?? 1} label={user?.clearance_label} />
               {roles.slice(0, 2).map((r) => <RolePill key={r} role={r} />)}
@@ -352,31 +525,260 @@ export default function Chat() {
             {messages.map((m, i) =>
               m.role === "user" ? (
                 <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex justify-end">
-                  <p className="max-w-[85%] rounded-2xl rounded-br-md border border-accent/25 bg-gradient-to-br from-accent/20 to-ai/10 px-4 py-2.5 text-sm text-ink">
-                    {m.content}
-                  </p>
+                  <div className="flex flex-col items-end gap-1 max-w-[85%]">
+                    <p className="rounded-2xl rounded-br-md border border-accent/25 bg-gradient-to-br from-accent/20 to-ai/10 px-4 py-2.5 text-sm text-ink">
+                      {m.content}
+                    </p>
+                    {m.selected_document_ids && m.selected_document_ids.length > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-accent px-2 py-0.5 rounded-full bg-accent/10 border border-accent/20">
+                        <SlidersHorizontal className="h-2.5 w-2.5" />
+                        Scoped to {m.selected_document_ids.length} {m.selected_document_ids.length === 1 ? "document" : "documents"}
+                      </span>
+                    )}
+                  </div>
                 </motion.div>
               ) : (
-                <AnswerCard key={i} message={m} selected={selected} onSelect={setSelected} />
+                <AnswerCard
+                  key={i}
+                  message={m}
+                  selected={selected}
+                  onSelect={setSelected}
+                  onRequestAccess={handleOpenRequestAccess}
+                />
               ),
             )}
             {busy && <Thinking />}
             <div ref={bottomRef} />
           </div>
 
-          {/* Composer */}
-          <form onSubmit={(e) => { e.preventDefault(); ask(question); }}
-            className="glass mt-3 flex items-end gap-2 rounded-2xl p-2 focus-within:border-accent/50 focus-within:shadow-[0_0_0_4px_rgba(34,211,238,0.08)]">
-            <textarea ref={inputRef} rows={1} value={question} maxLength={2000} aria-label="Your question"
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(question); } }}
-              placeholder="Ask about policies, scans, photos or records…"
-              className="max-h-32 min-h-[44px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm text-ink placeholder:text-muted-light focus:outline-none" />
-            <button type="submit" disabled={busy || !question.trim()} aria-label="Send question"
-              className="btn-primary grid h-11 w-11 shrink-0 place-items-center rounded-xl disabled:opacity-30">
-              <ArrowUp className="h-5 w-5" />
-            </button>
-          </form>
+          {/* Document Scope Selector Bar & Composer */}
+          <div className="relative mt-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1 mb-1.5 text-xs">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowDocPicker(!showDocPicker)}
+                  className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+                    selectedDocIds.length > 0
+                      ? "border-accent/50 bg-accent/15 text-accent shadow-2xs font-semibold"
+                      : "border-line bg-surface-subtle/80 text-ink-light hover:border-accent/40 hover:text-accent"
+                  }`}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-accent" />
+                  <span>
+                    {selectedDocIds.length === 0
+                      ? `Scope: All Documents (${readableDocs.length})`
+                      : `Scope: ${selectedDocIds.length} ${selectedDocIds.length === 1 ? "Doc" : "Docs"} Selected`}
+                  </span>
+                  <ChevronDown className={`h-3 w-3 transition-transform ${showDocPicker ? "rotate-180" : ""}`} />
+                </button>
+
+                {selectedDocIds.length > 0 && (
+                  <>
+                    {/* Selected Doc Badges (up to 3) */}
+                    {selectedDocIds.slice(0, 3).map((id) => {
+                      const doc = docs.find((d) => d.id === id);
+                      if (!doc) return null;
+                      const k = kindStyle(doc.kind, doc.note);
+                      const Icon = k.icon;
+                      return (
+                        <span
+                          key={id}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-ink max-w-[200px]"
+                          title={doc.title}
+                        >
+                          <Icon className="h-3 w-3 shrink-0 text-accent" />
+                          <span className="truncate">{doc.title}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleDocSelection(id)}
+                            className="text-muted hover:text-deny cursor-pointer ml-0.5"
+                            title="Remove from scope"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                    {selectedDocIds.length > 3 && (
+                      <span className="rounded-lg bg-surface-subtle border border-line px-1.5 py-0.5 text-[11px] text-muted font-medium">
+                        +{selectedDocIds.length - 3} more
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={clearDocSelection}
+                      className="text-[11px] text-muted hover:text-deny underline cursor-pointer ml-1"
+                    >
+                      Reset to All
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {selectedDocIds.length > 0 && (
+                <span className="text-[10px] text-muted italic hidden sm:inline">
+                  Targeted search · {selectedDocIds.length} of {readableDocs.length} sources
+                </span>
+              )}
+            </div>
+
+            {/* Document Picker Dropdown Popover */}
+            <AnimatePresence>
+              {showDocPicker && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowDocPicker(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                    transition={{ duration: 0.18 }}
+                    className="glass absolute bottom-full left-0 right-0 z-50 mb-2 max-h-[360px] flex flex-col rounded-2xl border border-line p-3 shadow-2xl backdrop-blur-md overflow-hidden"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-line gap-2">
+                      <div>
+                        <h4 className="text-xs font-bold text-ink flex items-center gap-1.5">
+                          <SlidersHorizontal className="h-3.5 w-3.5 text-accent" />
+                          Scope Query to Specific Documents
+                        </h4>
+                        <p className="text-[11px] text-muted">
+                          Select documents to restrict retrieval, or clear to search all {readableDocs.length} authorized sources.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={selectAllDocs}
+                          className="rounded-lg border border-line px-2 py-1 text-[11px] font-semibold text-ink-light hover:border-accent/40 hover:text-accent cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearDocSelection}
+                          className="rounded-lg border border-line px-2 py-1 text-[11px] font-semibold text-ink-light hover:border-deny/40 hover:text-deny cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowDocPicker(false)}
+                          className="rounded-lg p-1 text-muted hover:bg-surface-hover hover:text-ink cursor-pointer ml-1"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Filter input */}
+                    <div className="pt-2 pb-1.5">
+                      <div className="flex items-center gap-2 rounded-xl border border-line bg-surface px-2.5 py-1.5 text-xs">
+                        <Search className="h-3.5 w-3.5 text-muted shrink-0" />
+                        <input
+                          type="text"
+                          value={docFilterText}
+                          onChange={(e) => setDocFilterText(e.target.value)}
+                          placeholder="Search documents by name or filename..."
+                          className="w-full bg-transparent text-xs text-ink placeholder:text-muted focus:outline-none"
+                        />
+                        {docFilterText && (
+                          <button type="button" onClick={() => setDocFilterText("")} className="text-muted hover:text-ink">
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Scrollable document list */}
+                    <div className="space-y-1 overflow-y-auto max-h-[200px] py-1 pr-0.5">
+                      {filteredReadableDocs.length === 0 ? (
+                        <div className="py-6 text-center text-xs text-muted">
+                          No authorized documents match "{docFilterText}"
+                        </div>
+                      ) : (
+                        filteredReadableDocs.map((d) => {
+                          const isSelected = selectedDocIds.includes(d.id);
+                          const k = kindStyle(d.kind, d.note);
+                          const Icon = k.icon;
+                          return (
+                            <div
+                              key={d.id}
+                              onClick={() => toggleDocSelection(d.id)}
+                              className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 text-xs transition-colors cursor-pointer ${
+                                isSelected
+                                  ? "border-accent/50 bg-accent/15 text-ink shadow-2xs"
+                                  : "border-line/60 bg-surface-subtle/40 text-ink hover:border-line hover:bg-surface-subtle"
+                              }`}
+                            >
+                              <div
+                                className={`grid h-4 w-4 place-items-center rounded border transition-colors shrink-0 ${
+                                  isSelected
+                                    ? "border-accent bg-accent text-white"
+                                    : "border-line bg-surface"
+                                }`}
+                              >
+                                {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
+                              </div>
+                              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border ${k.tint}`}>
+                                <Icon className="h-3.5 w-3.5" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="truncate font-semibold text-xs text-ink">{d.title}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] text-muted">
+                                  <span>{k.label}</span>
+                                  <span>·</span>
+                                  <span className="truncate">{d.filename}</span>
+                                  {d.row_policy?.column && <span>· row rules</span>}
+                                </div>
+                              </div>
+                              <span
+                                className="rounded px-1.5 py-0.5 text-[9px] font-mono uppercase bg-surface border border-line text-muted shrink-0"
+                              >
+                                Level {d.classification}
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between pt-2 border-t border-line text-[11px] text-muted">
+                      <span>
+                        {selectedDocIds.length === 0
+                          ? `All ${readableDocs.length} authorized documents are active in scope`
+                          : `${selectedDocIds.length} of ${readableDocs.length} documents selected`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowDocPicker(false)}
+                        className="btn-primary px-3 py-1 text-xs rounded-lg"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+
+            {/* Composer */}
+            <form onSubmit={(e) => { e.preventDefault(); ask(question); }}
+              className="glass flex items-end gap-2 rounded-2xl p-2 focus-within:border-accent/50 focus-within:shadow-[0_0_0_4px_rgba(34,211,238,0.08)]">
+              <textarea ref={inputRef} rows={1} value={question} maxLength={2000} aria-label="Your question"
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(question); } }}
+                placeholder={selectedDocIds.length > 0 ? `Ask about the ${selectedDocIds.length} selected document(s)…` : "Ask about policies, scans, photos or records…"}
+                className="max-h-32 min-h-[44px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm text-ink placeholder:text-muted-light focus:outline-none" />
+              <button type="submit" disabled={busy || !question.trim()} aria-label="Send question"
+                className="btn-primary grid h-11 w-11 shrink-0 place-items-center rounded-xl disabled:opacity-30">
+                <ArrowUp className="h-5 w-5" />
+              </button>
+            </form>
+          </div>
         </div>
 
         {/* Evidence / scope panel */}
@@ -385,7 +787,14 @@ export default function Chat() {
             {selected ? (
               <EvidenceViewer key={selected.chunk_id + (selected.quote ?? "")} citation={selected} onClose={() => setSelected(null)} />
             ) : (
-              <AccessLens docs={docs} info={info} />
+              <AccessLens
+                docs={docs}
+                info={info}
+                selectedDocIds={selectedDocIds}
+                onToggleDoc={toggleDocSelection}
+                onSelectAll={selectAllDocs}
+                onClear={clearDocSelection}
+              />
             )}
           </AnimatePresence>
         </div>
@@ -400,6 +809,92 @@ export default function Chat() {
               <EvidenceViewer citation={selected} onClose={() => setSelected(null)} />
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Inline Request Access Modal */}
+      <AnimatePresence>
+        {showRequestModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="glass w-full max-w-lg rounded-2xl border border-line p-6 shadow-xl space-y-4"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-xl border border-accent/30 bg-accent/10 p-2.5 text-accent">
+                    <KeyRound className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-ink">Request Document Access</h3>
+                    <p className="text-xs text-muted">Submit an access authorization request to document approvers</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRequestModal(false)}
+                  className="rounded-lg p-1 text-muted hover:bg-surface-hover hover:text-ink cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-muted font-medium mb-1">Target Resource</label>
+                  {requestAccessResource ? (
+                    <div className="rounded-xl border border-line bg-surface-subtle p-3 text-ink font-semibold flex items-center justify-between">
+                      <span className="truncate">{requestAccessResource.title}</span>
+                      {requestAccessResource.classification !== undefined && (
+                        <span className="rounded px-2 py-0.5 bg-line text-[10px] font-mono text-muted uppercase shrink-0">
+                          Level {requestAccessResource.classification}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedDocId}
+                      onChange={(e) => setSelectedDocId(e.target.value)}
+                      className="w-full rounded-xl border border-line bg-surface p-2.5 text-xs text-ink focus:outline-accent"
+                    >
+                      <option value="">Select a restricted document…</option>
+                      {docs.filter((d) => !d.readable).map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.title} (Level {d.classification})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-muted font-medium mb-1">Business Reason / Justification</label>
+                  <textarea
+                    rows={3}
+                    value={requestReason}
+                    onChange={(e) => setRequestReason(e.target.value)}
+                    placeholder="Describe why you need access to this document..."
+                    className="w-full rounded-xl border border-line bg-surface p-3 text-xs text-ink focus:outline-accent resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
+                <Button kind="secondary" onClick={() => setShowRequestModal(false)} disabled={requestSubmitting}>
+                  Cancel
+                </Button>
+                <Button
+                  kind="primary"
+                  disabled={requestSubmitting || (!requestAccessResource && !selectedDocId) || requestReason.trim().length < 3}
+                  onClick={handleSubmitAccessRequest}
+                >
+                  {requestSubmitting ? "Submitting…" : "Submit Access Request"}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

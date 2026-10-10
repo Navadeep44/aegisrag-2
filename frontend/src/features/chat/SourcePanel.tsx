@@ -9,6 +9,9 @@ export function SourcePanel({ citation }: { citation: Citation }) {
   const [image, setImage] = useState<string | null>(null);
   const [loadingImg, setLoadingImg] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useState<{ x: number; y: number; panX: number; panY: number }>({ x: 0, y: 0, panX: 0, panY: 0 })[0];
 
   useEffect(() => {
     let url: string | null = null;
@@ -16,6 +19,7 @@ export function SourcePanel({ citation }: { citation: Citation }) {
     setImage(null);
     setLoadingImg(true);
     setZoom(1);
+    setPan({ x: 0, y: 0 });
 
     imageUrl(`/documents/${citation.document_id}/pages/${citation.page}`)
       .then((u) => {
@@ -38,6 +42,38 @@ export function SourcePanel({ citation }: { citation: Citation }) {
       if (url) URL.revokeObjectURL(url);
     };
   }, [citation.document_id, citation.page]);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.2 : -0.2;
+    setZoom((z) => Math.min(3.5, Math.max(0.6, +(z + delta).toFixed(2))));
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setIsDragging(true);
+    dragStartRef.x = e.clientX;
+    dragStartRef.y = e.clientY;
+    dragStartRef.panX = pan.x;
+    dragStartRef.panY = pan.y;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setPan({
+      x: dragStartRef.panX + (e.clientX - dragStartRef.x),
+      y: dragStartRef.panY + (e.clientY - dragStartRef.y),
+    });
+  };
+
+  const handleDoubleClick = () => {
+    if (zoom > 1 || pan.x !== 0 || pan.y !== 0) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    } else {
+      setZoom(2);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -94,9 +130,12 @@ export function SourcePanel({ citation }: { citation: Citation }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setZoom(1)}
+                  onClick={() => {
+                    setZoom(1);
+                    setPan({ x: 0, y: 0 });
+                  }}
                   className="rounded p-1 text-muted hover:bg-surface-hover hover:text-ink transition-colors"
-                  title="Reset zoom"
+                  title="Reset zoom and position"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                 </button>
@@ -119,13 +158,33 @@ export function SourcePanel({ citation }: { citation: Citation }) {
             <Skeleton className="h-48 w-full rounded-lg" />
           </div>
         ) : image ? (
-          <div className="rounded-xl border border-line bg-surface p-2 shadow-xs overflow-auto max-h-[550px] flex items-center justify-center">
-            <img
-              src={image}
-              alt={`Page ${citation.page} of ${citation.title}`}
-              style={{ transform: `scale(${zoom})`, transformOrigin: "top center", transition: "transform 0.15s ease-out" }}
-              className="w-full object-contain rounded-lg border border-line shadow-xs"
-            />
+          <div
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={() => setIsDragging(false)}
+            onMouseLeave={() => setIsDragging(false)}
+            onDoubleClick={handleDoubleClick}
+            className="group relative select-none rounded-xl border border-line bg-surface p-2 shadow-xs overflow-hidden max-h-[550px] min-h-[300px] flex items-center justify-center"
+            style={{ cursor: isDragging ? "grabbing" : zoom > 1 ? "grab" : "default" }}
+          >
+            <div
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: "center center",
+                transition: isDragging ? "none" : "transform 0.15s ease-out",
+              }}
+              className="inline-block max-w-full"
+            >
+              <img
+                src={image}
+                alt={`Page ${citation.page} of ${citation.title}`}
+                className="w-full object-contain rounded-lg border border-line shadow-xs pointer-events-none select-none"
+              />
+            </div>
+            <div className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-black/60 px-2 py-1 text-[10px] text-white/90 backdrop-blur-xs opacity-75 group-hover:opacity-100 transition-opacity">
+              {Math.round(zoom * 100)}% · Wheel to zoom · Drag to pan · Double-click to reset
+            </div>
           </div>
         ) : (
           <div className="rounded-xl border border-line bg-surface-subtle p-4 space-y-2">

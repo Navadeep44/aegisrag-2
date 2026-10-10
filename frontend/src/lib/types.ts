@@ -75,6 +75,8 @@ export type Doc = {
   classification: number;
   classification_label: string;
   status: string;
+  stage?: string;
+  progress_percent?: number;
   note: string;
   page_count: number;
   flagged: boolean;
@@ -101,6 +103,7 @@ export type DocStatus = {
   status: string;
   job_status: string;
   stage: string;
+  percent?: number;
   note: string;
   page_count: number;
   version: number;
@@ -147,6 +150,8 @@ export type AnswerMeta = {
   table?: { columns: string[]; rows: string[][]; citations?: number[] } | null;
   gaps?: string;
   grounding?: { score: number; claims: number; verified: number; partial: number };
+  suggested_resource?: { id: string; title: string; classification: number } | null;
+  selected_document_ids?: string[] | null;
   trace?: { steps: TraceStep[]; total_ms: number };
 };
 
@@ -174,6 +179,7 @@ export type Message = {
     title: string;
     classification: number;
   } | null;
+  selected_document_ids?: string[] | null;
   meta?: AnswerMeta | null;
   isNew?: boolean;
 };

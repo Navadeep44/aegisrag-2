@@ -106,7 +106,7 @@ def seed(db: Session) -> None:
     from app.industry_templates import slugify
 
     platform_tenant = Tenant(
-        name="Aegis Platform",
+        name="Eyes Only Platform",
         slug="platform",
         industry_category="technology",
         status="active",
@@ -174,7 +174,7 @@ def seed(db: Session) -> None:
     db.flush()
 
     # Create Departments
-    platform_dept = Department(tenant_id=platform_tenant.id, name="Platform Ops")
+    platform_dept = Department(tenant_id=platform_tenant.id, name="Platform Infrastructure")
     db.add(platform_dept)
 
     dept_names = ["IT", "Executive", "Security", "Operations", "Compliance", "Engineering", "HR", "Finance", "General"]

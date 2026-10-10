@@ -34,6 +34,11 @@ function highlight(text: string, quote?: string) {
 export function EvidenceViewer({ citation, onClose }: { citation: Citation; onClose: () => void }) {
   const [src, setSrc] = useState<string | null>(null);
   const [rects, setRects] = useState<number[][]>([]);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useState<{ x: number; y: number; panX: number; panY: number }>({ x: 0, y: 0, panX: 0, panY: 0 })[0];
+
   const k = kindStyle(citation.kind, citation.location);
   const Icon = k.icon;
   const pairs = citation.kind === "database" || citation.kind === "xlsx" ? recordPairs(citation.snippet) : null;
@@ -43,17 +48,51 @@ export function EvidenceViewer({ citation, onClose }: { citation: Citation; onCl
     let url: string | null = null;
     setSrc(null);
     setRects([]);
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
     if (showImage) {
       imageUrl(`/documents/${citation.document_id}/pages/${citation.page}`).then((u) => { url = u; setSrc(u); });
     }
     const q = citation.quote || citation.snippet.split("\n").find((l) => l.trim().length > 20) || "";
-    if (citation.kind === "pdf" && q) {
+    if ((citation.kind === "pdf" || citation.kind === "image") && q) {
       api<{ rects: number[][] }>(
         `/documents/${citation.document_id}/pages/${citation.page}/highlights?q=${encodeURIComponent(q.slice(0, 300))}`,
-      ).then((r) => setRects(r.rects)).catch(() => {});
+      ).then((r) => setRects(r.rects || [])).catch(() => {});
     }
     return () => { if (url) URL.revokeObjectURL(url); };
-  }, [citation.chunk_id, citation.quote]);
+  }, [citation.chunk_id, citation.quote, citation.document_id, citation.page, citation.kind]);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.2 : -0.2;
+    setZoom((z) => Math.min(3.5, Math.max(0.6, +(z + delta).toFixed(2))));
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setIsDragging(true);
+    dragStartRef.x = e.clientX;
+    dragStartRef.y = e.clientY;
+    dragStartRef.panX = pan.x;
+    dragStartRef.panY = pan.y;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setPan({
+      x: dragStartRef.panX + (e.clientX - dragStartRef.x),
+      y: dragStartRef.panY + (e.clientY - dragStartRef.y),
+    });
+  };
+
+  const handleDoubleClick = () => {
+    if (zoom > 1 || pan.x !== 0 || pan.y !== 0) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    } else {
+      setZoom(2);
+    }
+  };
 
   return (
     <motion.aside initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }}
@@ -99,18 +138,41 @@ export function EvidenceViewer({ citation, onClose }: { citation: Citation; onCl
             ))}
           </div>
         ) : (
-          <div className="relative overflow-hidden rounded-xl border border-line bg-white shadow-sm">
+          <div
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={() => setIsDragging(false)}
+            onMouseLeave={() => setIsDragging(false)}
+            onDoubleClick={handleDoubleClick}
+            className="group relative select-none overflow-hidden rounded-xl border border-line bg-white shadow-sm flex items-center justify-center min-h-[280px]"
+            style={{ cursor: isDragging ? "grabbing" : zoom > 1 ? "grab" : "default" }}
+          >
             {src ? (
-              <>
-                <img src={src} alt={`${citation.title}, page ${citation.page}`} className="block w-full" />
+              <div
+                style={{
+                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                  transformOrigin: "center center",
+                  transition: isDragging ? "none" : "transform 0.15s ease-out",
+                }}
+                className="relative inline-block max-w-full"
+              >
+                <img src={src} alt={`${citation.title}, page ${citation.page}`} className="block w-full pointer-events-none select-none" />
                 {rects.map((r, i) => (
-                  <motion.span key={i} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 + i * 0.03 }}
-                    className="absolute rounded-sm bg-amber-300/45 ring-2 ring-amber-500/80 mix-blend-multiply"
+                  <motion.span key={i} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 + i * 0.02 }}
+                    className="absolute rounded-sm bg-amber-300/50 ring-2 ring-amber-500/80 mix-blend-multiply pointer-events-none"
                     style={{ left: `${r[0] * 100}%`, top: `${r[1] * 100}%`, width: `${(r[2] - r[0]) * 100}%`, height: `${(r[3] - r[1]) * 100}%` }} />
                 ))}
-              </>
+              </div>
             ) : (
               <div className="skeleton aspect-[3/4] w-full" />
+            )}
+
+            {/* Hint overlay on hover */}
+            {src && (
+              <div className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-black/60 px-2 py-1 text-[10px] text-white/90 backdrop-blur-xs opacity-75 group-hover:opacity-100 transition-opacity">
+                {Math.round(zoom * 100)}% · Wheel to zoom · Drag to pan · Double-click to reset
+              </div>
             )}
           </div>
         )}

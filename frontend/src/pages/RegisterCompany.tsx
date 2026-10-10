@@ -214,7 +214,7 @@ export default function RegisterCompany() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-white font-bold text-sm">
               AR
             </div>
-            <span className="font-semibold text-ink text-sm">AegisRAG Enterprise</span>
+            <span className="font-semibold text-ink text-sm">Eyes Only Enterprise</span>
           </Link>
 
           <Link to="/signin" className="text-xs text-muted hover:text-ink transition-colors">

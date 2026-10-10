@@ -21,6 +21,7 @@ import {
   Globe,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { useWebSocketEvent } from "../../context/WebSocketContext";
 import { api } from "../../lib/api";
 import { ClearancePill, RolePill } from "../ui/StatusPill";
 import { LenisProvider, useLenisContext } from "../motion/LenisProvider";
@@ -59,7 +60,7 @@ export function AppShell() {
   }, [location.pathname]);
 
   // Load pending access requests count for badge
-  useEffect(() => {
+  const refreshBadge = () => {
     if (!user) return;
     api<{ pending_requests_count?: number; my_requests_count?: number }>("/dashboard/stats")
       .then((data) => {
@@ -67,7 +68,15 @@ export function AppShell() {
         setPendingRequestsCount(count);
       })
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshBadge();
   }, [user, location.pathname]);
+
+  // Real-time badge updates via WebSocket
+  useWebSocketEvent("access_request.created", refreshBadge);
+  useWebSocketEvent("access_request.decided", refreshBadge);
 
   // Track scroll progress for top progress indicator
   useEffect(() => {
@@ -107,7 +116,7 @@ export function AppShell() {
   // Group 1: Workspace
   const workspaceItems: NavItem[] = [
     { path: "dashboard", label: "Home", icon: LayoutDashboard },
-    { path: "ask", label: "Ask Aegis", icon: Sparkles },
+    { path: "ask", label: "Ask", icon: Sparkles },
     { path: "documents", label: "Documents", icon: FileText },
   ];
   navGroups.push({ label: "Workspace", items: workspaceItems });
@@ -138,14 +147,11 @@ export function AppShell() {
   if (isAdmin || isOwner || isPlatformAdmin) {
     systemItems.push({ path: "settings", label: "Settings", icon: Settings });
   }
-  if (isAdmin || isAuditor || isPlatformAdmin || perms.has("audit.read")) {
+  if (isAdmin || isAuditor || isOwner || isPlatformAdmin || perms.has("audit.read") || perms.has("security_tests.read")) {
     systemItems.push({ path: "security", label: "Security & Audit", icon: ShieldCheck });
   }
-  if (isAdmin || isIamAdmin || perms.has("policy.simulate")) {
+  if (isAdmin || isIamAdmin || isOwner || perms.has("policy.simulate")) {
     systemItems.push({ path: "simulator", label: "Simulator", icon: SlidersHorizontal });
-  }
-  if (isPlatformAdmin) {
-    systemItems.push({ path: "platform", label: "Platform Ops", icon: Cpu });
   }
   if (systemItems.length > 0) {
     navGroups.push({ label: "System", items: systemItems });

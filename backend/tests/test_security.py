@@ -255,3 +255,30 @@ def test_simulator_matches_enforcement(client, db, login):
     assert "48.2" not in json.dumps(result)
     readable = {db.get(Document, i).title for i in readable_document_ids(db, user(db, EMPLOYEE))}
     assert {d["title"] for d in result["searchable"]} == readable
+
+
+def test_selective_document_scoping_and_security(client, db, login):
+    """User can scope query to specific documents, and unauthorized documents remain withheld"""
+    leave_id = doc_id(db, "Leave Policy")
+    visitor_id = doc_id(db, "Visitor Policy Notice (photo)")
+    revenue_id = doc_id(db, "FY2025 Revenue Report")
+
+    # 1. Scoped to the correct authorized document -> answered, only that document is in context
+    res1 = ask(client, login(EMPLOYEE), "How many days of annual leave do employees get?", document_ids=[leave_id])
+    assert res1["status"] == "answered"
+    assert all(c["document_id"] == leave_id for c in res1["citations"])
+    assert last_context(db, EMPLOYEE) == {leave_id}
+
+    # 2. Scoped to another authorized document where the answer does NOT exist -> abstained, leave policy not probed
+    res2 = ask(client, login(EMPLOYEE), "How many days of annual leave do employees get?", document_ids=[visitor_id])
+    assert res2["status"] == "abstained"
+    assert last_context(db, EMPLOYEE) == {visitor_id}
+    assert leave_id not in last_context(db, EMPLOYEE)
+
+    # 3. Scoped to an unauthorized document -> abstains, never leaks, suggests the requested resource
+    res3 = ask(client, login(EMPLOYEE), "What was our annual revenue?", document_ids=[revenue_id])
+    assert res3["status"] == "abstained"
+    assert revenue_id not in last_context(db, EMPLOYEE)
+    assert res3["suggested_resource"] is not None
+    assert res3["suggested_resource"]["id"] == revenue_id
+

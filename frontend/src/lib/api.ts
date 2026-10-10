@@ -7,6 +7,7 @@ export function setToken(value: string) {
   else sessionStorage.removeItem(TOKEN_KEY);
 }
 export const hasToken = () => Boolean(token);
+export const getToken = () => token;
 
 function headers(body?: BodyInit | null): Record<string, string> {
   const out: Record<string, string> = {};

@@ -1,4 +1,4 @@
-# AegisRAG
+# Eyes Only
 
 Secure multimodal RAG with access control. Hackathon build for PS-01.
 

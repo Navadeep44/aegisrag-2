@@ -175,6 +175,7 @@ def answer_question(
     question: str,
     conversation_id: str | None,
     briefing_mode: bool = False,
+    document_ids: list[str] | None = None,
 ) -> dict:
     started = time.perf_counter()
     steps: list[dict] = []
@@ -206,18 +207,32 @@ def answer_question(
 
     # 2. Authorization: computed in SQL, before any search.
     t0 = time.perf_counter()
-    readable_ids = readable_document_ids(db, user)
+    all_readable_ids = readable_document_ids(db, user)
+    scoped_search = document_ids is not None
+    if scoped_search:
+        selected_set = set(document_ids)
+        readable_ids = [d for d in all_readable_ids if d in selected_set]
+    else:
+        readable_ids = all_readable_ids
+
     authz = _authz_stats(db, user, readable_ids)
     step("authz", "Permission filter compiled into retrieval SQL", t0, **authz)
 
-    history = allowed_history(conversation, readable_ids)
+    history = allowed_history(conversation, set(all_readable_ids))
     retrieval_query = resolve_coreference(question, history)
     q_analysis = retrieval.parse_query_intent_and_entity(question)
 
     # 3. Retrieval over authorized chunks only.
     t0 = time.perf_counter()
     rtrace: dict = {}
-    hits = retrieval.search(db, user, retrieval_query, trace=rtrace) if readable_ids else []
+    hits = (
+        retrieval.search(
+            db, user, retrieval_query, trace=rtrace,
+            document_ids=readable_ids if scoped_search else None
+        )
+        if readable_ids
+        else []
+    )
     evidence = _evidence(hits)
     context_ids = {h.chunk.id for h in hits}
     step("retrieve", "Hybrid search (dense + BM25, reciprocal-rank fusion)", t0, hits=len(hits),
@@ -234,7 +249,10 @@ def answer_question(
         other_docs = [d.title for d in db.query(Document).filter(Document.id.in_(readable_ids),
                                                                 Document.kind.notin_(["database", "xlsx"]))]
         try:
-            table_result = analytics.answer(db, user, question, other_docs)
+            table_result = analytics.answer(
+                db, user, question, other_docs,
+                document_ids=readable_ids if scoped_search else None
+            )
         except Exception as exc:
             logger.warning("Analytics failed, using document retrieval: %s", exc)
     if table_result:
@@ -287,7 +305,10 @@ def answer_question(
             valid, dropped = validate_citations(result.get("citations", []), context_ids)
             val_res = validator.validate_answer(question, result, evidence, q_analysis)
             if not val_res.valid and val_res.should_retry:
-                expanded = retrieval.search(db, user, retrieval_query, top_k=50)
+                expanded = retrieval.search(
+                    db, user, retrieval_query, top_k=50,
+                    document_ids=readable_ids if scoped_search else None
+                )
                 if len(expanded) > len(hits):
                     hits, evidence = expanded, _evidence(expanded)
                     context_ids = {h.chunk.id for h in hits}
@@ -349,25 +370,70 @@ def answer_question(
         status = "answered"
     else:
         if not readable_ids:
-            answer_text = NO_AUTHORIZED_DOCS
+            if scoped_search:
+                answer_text = (
+                    "None of the selected documents are authorized under your current permissions "
+                    "or no matching documents were found in your selection."
+                )
+            else:
+                answer_text = NO_AUTHORIZED_DOCS
         else:
             titles = [d.title for d in db.query(Document).filter(Document.id.in_(readable_ids)).limit(5)]
-            answer_text = ("I couldn't find an answer in the documents you're authorized to search ("
-                           + ", ".join(titles) + "). If you need other sources, request access from the Documents page.")
+            if scoped_search:
+                answer_text = (
+                    f"I couldn't find an answer in the selected documents ({', '.join(titles)}). "
+                    "You can expand your selection or request access to other sources."
+                )
+            else:
+                answer_text = ("I couldn't find an answer in the documents you're authorized to search ("
+                               + ", ".join(titles) + "). If you need other sources, request access from the Documents page.")
         status, claims, citations, table = "abstained", [], [], None
+
+    suggested_resource = None
+    if status in ("abstained", "refused"):
+        unauthorized_docs = db.query(Document).filter(
+            Document.tenant_id == user.tenant_id,
+            Document.status == "active",
+            Document.id.notin_(readable_ids)
+        ).all()
+        if unauthorized_docs:
+            target = None
+            if scoped_search and document_ids:
+                scoped_unauth = [d for d in unauthorized_docs if d.id in set(document_ids)]
+                if scoped_unauth:
+                    target = scoped_unauth[0]
+            if not target:
+                q_tokens = set(ai.tokens(question))
+                best_doc = None
+                best_score = -1
+                for d in unauthorized_docs:
+                    d_tokens = set(ai.tokens(d.title))
+                    overlap = len(q_tokens & d_tokens)
+                    if overlap > best_score:
+                        best_score = overlap
+                        best_doc = d
+                target = best_doc or unauthorized_docs[0]
+            suggested_resource = {
+                "id": target.id,
+                "title": target.title,
+                "classification": target.classification,
+            }
 
     g = {"score": grounding.score(claims), "claims": len(claims),
          "verified": sum(c.status in (grounding.VERIFIED, grounding.COMPUTED) for c in claims),
          "partial": sum(c.status == grounding.PARTIAL for c in claims)}
     meta = {"mode": mode, "headline": headline if answered else "", "claims": [c.to_dict() for c in claims],
             "table": table, "gaps": gaps if answered else "", "grounding": g,
+            "suggested_resource": suggested_resource,
+            "selected_document_ids": document_ids if scoped_search else None,
             "trace": {"steps": steps, "total_ms": round((time.perf_counter() - started) * 1000)}}
     return _finish(db, user, conversation, question, status=status, answer=answer_text, citations=citations,
-                   meta=meta, context_ids=context_ids, hits=hits, dropped=dropped, briefing_mode=briefing_mode)
+                   meta=meta, context_ids=context_ids, hits=hits, dropped=dropped, briefing_mode=briefing_mode,
+                   suggested_resource=suggested_resource)
 
 
 def _finish(db, user, conversation, question, *, status, answer, citations, meta, context_ids, hits,
-            dropped, briefing_mode) -> dict:
+            dropped, briefing_mode, suggested_resource=None) -> dict:
     db.add(Message(conversation_id=conversation.id, role="user", content=question))
     reply = Message(conversation_id=conversation.id, role="assistant", content=answer,
                     status=status, citations=citations, meta=meta)
@@ -387,6 +453,8 @@ def _finish(db, user, conversation, question, *, status, answer, citations, meta
         grounding=(meta or {}).get("grounding"),
         mode=(meta or {}).get("mode"),
         briefing_mode=briefing_mode,
+        suggested_resource=suggested_resource.get("title") if suggested_resource else None,
+        selected_document_ids=(meta or {}).get("selected_document_ids"),
     )
     return {
         "conversation_id": conversation.id,
@@ -394,6 +462,7 @@ def _finish(db, user, conversation, question, *, status, answer, citations, meta
         "status": status,
         "answer": answer,
         "citations": citations,
-        "suggested_resource": None,
+        "suggested_resource": suggested_resource,
         "meta": meta,
     }
+

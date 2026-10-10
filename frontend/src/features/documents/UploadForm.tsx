@@ -4,6 +4,7 @@ import {
   UploadCloud,
   FileText,
   FileSpreadsheet,
+  Image as ImageIcon,
   CheckCircle2,
   X,
   Plus,
@@ -27,8 +28,9 @@ interface SelectedFileItem {
   id: string;
   file: File;
   title: string;
-  type: "pdf" | "database";
+  type: "pdf" | "image" | "spreadsheet" | "database" | "document";
   status: "idle" | "uploading" | "done" | "error";
+  progress?: number;
   errorMsg?: string;
 }
 
@@ -62,14 +64,17 @@ export function UploadForm({
   const [isDragOver, setIsDragOver] = useState(false);
   const [currentStageIdx, setCurrentStageIdx] = useState(0);
   const [currentFileIdx, setCurrentFileIdx] = useState(0);
+  const [batchProgress, setBatchProgress] = useState(0);
   const [showArchitectureGuide, setShowArchitectureGuide] = useState(false);
 
-  const acceptedExtensions = ".pdf,.csv,.tsv,.json,.sql";
+  const acceptedExtensions = ".pdf,.png,.jpg,.jpeg,.xlsx,.docx,.csv,.tsv,.json,.sql,.txt,.md";
+  const validExts = [".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".docx", ".csv", ".tsv", ".json", ".sql", ".txt", ".md"];
 
   // Cycle through animated ingestion stages during busy state
   useEffect(() => {
     if (!busy) {
       setCurrentStageIdx(0);
+      setBatchProgress(0);
       return;
     }
     const interval = setInterval(() => {
@@ -88,26 +93,31 @@ export function UploadForm({
   const addFiles = (files: FileList | File[]) => {
     setError("");
     const newItems: SelectedFileItem[] = [];
-    const validExts = [".pdf", ".csv", ".tsv", ".json", ".sql"];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
       if (!validExts.includes(ext)) {
-        setError(`"${file.name}" has an unsupported format. Allowed: .pdf, .csv, .tsv, .json, .sql`);
+        setError(`"${file.name}" has an unsupported format. Supported: PDF, PNG, JPG, XLSX, DOCX, CSV, TSV, JSON, SQL, TXT, MD.`);
         continue;
       }
       if (selectedFiles.some((f) => f.file.name === file.name && f.file.size === file.size)) {
         continue;
       }
 
-      const fileType = ext === ".pdf" ? "pdf" : "database";
+      let fileType: "pdf" | "image" | "spreadsheet" | "database" | "document" = "document";
+      if (ext === ".pdf") fileType = "pdf";
+      else if ([".png", ".jpg", ".jpeg"].includes(ext)) fileType = "image";
+      else if ([".xlsx", ".csv", ".tsv"].includes(ext)) fileType = "spreadsheet";
+      else if ([".json", ".sql"].includes(ext)) fileType = "database";
+
       newItems.push({
         id: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         file,
         title: getCleanTitle(file.name),
         type: fileType,
         status: "idle",
+        progress: 0,
       });
     }
 
@@ -167,9 +177,10 @@ export function UploadForm({
     for (let i = 0; i < selectedFiles.length; i++) {
       const item = selectedFiles[i];
       setCurrentFileIdx(i);
+      setBatchProgress(Math.round((i / totalCount) * 100));
 
       setSelectedFiles((prev) =>
-        prev.map((f) => (f.id === item.id ? { ...f, status: "uploading" } : f))
+        prev.map((f) => (f.id === item.id ? { ...f, status: "uploading", progress: 30 } : f))
       );
 
       const form = new FormData();
@@ -179,13 +190,13 @@ export function UploadForm({
       form.append("grants", JSON.stringify(grants));
 
       try {
-        const endpoint = item.type === "pdf" ? "/documents/upload" : "/documents/upload-database";
-        await api(endpoint, { method: "POST", body: form });
+        await api("/documents/upload", { method: "POST", body: form });
 
         setSelectedFiles((prev) =>
-          prev.map((f) => (f.id === item.id ? { ...f, status: "done" } : f))
+          prev.map((f) => (f.id === item.id ? { ...f, status: "done", progress: 100 } : f))
         );
         successCount++;
+        setBatchProgress(Math.round(((i + 1) / totalCount) * 100));
       } catch (err) {
         const msg = (err as Error).message || "Upload failed";
         setSelectedFiles((prev) =>
@@ -297,12 +308,22 @@ export function UploadForm({
                   <div className="flex min-w-0 flex-1 items-center gap-3">
                     <div
                       className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border ${
-                        isPdf
+                        item.type === "image"
+                          ? "border-sky-500/30 bg-sky-500/10 text-sky-600"
+                          : item.type === "pdf"
                           ? "border-rose-500/30 bg-rose-500/10 text-rose-600"
-                          : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+                          : item.type === "spreadsheet" || item.type === "database"
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-600"
                       }`}
                     >
-                      {isPdf ? <FileText className="h-5 w-5" /> : <FileSpreadsheet className="h-5 w-5" />}
+                      {item.type === "image" ? (
+                        <ImageIcon className="h-5 w-5" />
+                      ) : item.type === "pdf" ? (
+                        <FileText className="h-5 w-5" />
+                      ) : (
+                        <FileSpreadsheet className="h-5 w-5" />
+                      )}
                     </div>
 
                     <div className="min-w-0 flex-1 space-y-0.5">
@@ -321,6 +342,14 @@ export function UploadForm({
                         <span>•</span>
                         <span className="uppercase font-semibold text-ink-light">{item.type}</span>
                       </div>
+                      {item.status === "uploading" && (
+                        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle border border-accent/20">
+                          <div
+                            className="h-full bg-gradient-to-r from-accent to-ai transition-all duration-300"
+                            style={{ width: `${item.progress || 40}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -419,30 +448,57 @@ export function UploadForm({
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="glass-premium rounded-2xl border border-accent/40 p-4 space-y-3 shadow-md"
+          className="glass-premium rounded-2xl border border-accent/40 p-5 space-y-4 shadow-lg bg-surface/90"
         >
+          {/* Batch Upload Progress Header */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CurrentStageIcon className="h-4 w-4 text-accent animate-spin-slow" />
-              <span className="text-xs font-bold text-ink">
-                Ingesting document {currentFileIdx + 1} of {selectedFiles.length}
-              </span>
+            <div className="flex items-center gap-2.5">
+              <RefreshCw className="h-4 w-4 text-accent animate-spin" />
+              <div>
+                <span className="text-xs font-bold text-ink block">
+                  Uploading & Ingesting Batch ({batchProgress}%)
+                </span>
+                <span className="text-[11px] text-muted font-mono">
+                  Document {currentFileIdx + 1} of {selectedFiles.length}: "{selectedFiles[currentFileIdx]?.title || ''}"
+                </span>
+              </div>
             </div>
-            <span className="font-mono text-[10px] text-muted font-bold">
-              Step {currentStageIdx + 1} / {INGESTION_STAGES.length}
+            <span className="font-mono text-xs text-accent font-bold px-2 py-0.5 rounded-full bg-accent/10 border border-accent/20">
+              {batchProgress}% Complete
             </span>
           </div>
 
-          <p className="text-xs text-ink-light transition-all duration-300">
-            {INGESTION_STAGES[currentStageIdx].label}…
-          </p>
-
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle border border-line/60">
+          {/* Primary Batch Progress Bar */}
+          <div className="h-3 w-full overflow-hidden rounded-full bg-surface-subtle border border-line">
             <motion.div
-              className="h-full bg-gradient-to-r from-accent via-ai to-allow"
-              animate={{ width: `${((currentStageIdx + 1) / INGESTION_STAGES.length) * 100}%` }}
-              transition={{ duration: 0.5 }}
+              className="h-full bg-gradient-to-r from-accent via-ai to-allow shadow-sm"
+              animate={{ width: `${Math.max(12, batchProgress)}%` }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
             />
+          </div>
+
+          {/* Active Pipeline Stage */}
+          <div className="pt-1 border-t border-line/40 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <CurrentStageIcon className="h-4 w-4 text-ai animate-spin-slow" />
+                <span className="text-xs font-semibold text-ink">
+                  {INGESTION_STAGES[currentStageIdx].label}…
+                </span>
+              </div>
+              <span className="font-mono text-[10px] text-muted font-semibold">
+                Pipeline Stage {currentStageIdx + 1} of {INGESTION_STAGES.length}
+              </span>
+            </div>
+
+            {/* Stage micro-bar */}
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle/80">
+              <motion.div
+                className="h-full bg-ai/70"
+                animate={{ width: `${((currentStageIdx + 1) / INGESTION_STAGES.length) * 100}%` }}
+                transition={{ duration: 0.4 }}
+              />
+            </div>
           </div>
         </motion.div>
       )}

@@ -395,7 +395,7 @@ export default function PlatformAdmin() {
       {activeTab === "tenants" && (
         <SectionCard
           title={`Tenants Directory (${tenants.length})`}
-          subtitle="All organizations hosted on this AegisRAG cluster."
+          subtitle="All organizations hosted on this Eyes Only cluster."
         >
           <div className="space-y-4">
             <div className="relative max-w-sm">

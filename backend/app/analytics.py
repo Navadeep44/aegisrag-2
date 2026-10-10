@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app import ai, llm
@@ -62,12 +62,14 @@ def num(value) -> float | None:
         return None
 
 
-def permitted_tables(db: Session, user: User) -> list[Table]:
+def permitted_tables(db: Session, user: User, document_ids: list[str] | None = None) -> list[Table]:
+    allowed = readable_chunk_clause(user)
+    where_clause = and_(allowed, Record.document_id.in_(document_ids)) if document_ids is not None else allowed
     rows = db.execute(
         select(Record.document_id, Record.sheet, Record.row_index, Record.data, Record.chunk_id, Document.title)
         .join(Chunk, Chunk.id == Record.chunk_id)
         .join(Document, Document.id == Record.document_id)
-        .where(readable_chunk_clause(user))
+        .where(where_clause)
         .order_by(Record.document_id, Record.sheet, Record.row_index)
     ).all()
     tables: dict[tuple[str, str], Table] = {}
@@ -339,9 +341,9 @@ def execute(plan: dict, tables: list[Table]) -> dict | None:
     return result
 
 
-def answer(db: Session, user: User, question: str, other_docs: list[str]) -> dict | None:
+def answer(db: Session, user: User, question: str, other_docs: list[str], document_ids: list[str] | None = None) -> dict | None:
     """Returns a computed result, or None when the question is not a table question."""
-    tables = permitted_tables(db, user)
+    tables = permitted_tables(db, user, document_ids=document_ids)
     if not tables:
         return None
     q_tokens = set(ai.tokens(question))

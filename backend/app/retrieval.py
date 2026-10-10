@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import cast, func, literal, or_, select
+from sqlalchemy import and_, cast, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app import ai
@@ -463,7 +463,7 @@ def _rank_in_python(db: Session, allowed, query: str, vector: list[float]):
 
 
 def search(db: Session, user: User, query: str, top_k: int | None = None,
-           trace: dict | None = None) -> list[Hit]:
+           trace: dict | None = None, document_ids: list[str] | None = None) -> list[Hit]:
     """Hybrid search. The permission filter is part of every SQL statement here,
     so a chunk the user may not read is never ranked, returned or loaded."""
     q_analysis = parse_query_intent_and_entity(query)
@@ -479,6 +479,8 @@ def search(db: Session, user: User, query: str, top_k: int | None = None,
     default_top_k = max(settings.retrieval_top_k, 25) if is_broad else settings.retrieval_top_k
     top_k = top_k or default_top_k
     allowed = readable_chunk_clause(user)
+    if document_ids is not None:
+        allowed = and_(allowed, Chunk.document_id.in_(document_ids))
     base = select(Chunk.id).join(Document, Chunk.document_id == Document.id).where(allowed)
 
     t0 = time.perf_counter()

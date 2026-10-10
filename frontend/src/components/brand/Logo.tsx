@@ -1,35 +1,48 @@
-/** AegisRAG mark: a shield whose core is a retrieval node graph. */
-export function LogoMark({ className = "h-8 w-8" }: { className?: string }) {
+import "@fontsource-variable/outfit";
+import { useId } from "react";
+
+/** Eyes Only mark: a one-line eye with a keyhole pupil inside a classified-document stamp.
+ *  Same drawing as public/brand/eyes-only-mark.svg, inlined so it stays crisp at any size. */
+export function LogoMark({ className = "h-8 w-8", stamp = true }: { className?: string; stamp?: boolean }) {
+  const ink = `ink-${useId().replace(/:/g, "")}`;
   return (
-    <svg viewBox="0 0 40 40" className={className} aria-hidden="true">
-      <defs>
-        <linearGradient id="lm-g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#0d9488" />
-          <stop offset="0.55" stopColor="#0f766e" />
-          <stop offset="1" stopColor="#b4532a" />
-        </linearGradient>
-      </defs>
-      <path d="M20 3 L34 8.5 V19c0 8.6-5.9 15.4-14 18-8.1-2.6-14-9.4-14-18V8.5Z"
-        fill="rgba(15,118,110,0.08)" stroke="url(#lm-g)" strokeWidth="2.2" strokeLinejoin="round" />
-      <g stroke="url(#lm-g)" strokeWidth="1.6" strokeLinecap="round">
-        <path d="M14 16 L20 21 L26 15 M20 21 V28" fill="none" />
+    <svg viewBox="0 0 120 82" className={className} aria-hidden="true">
+      {stamp && (
+        <>
+          <defs>
+            <mask id={ink}>
+              <rect width="120" height="82" fill="#fff" />
+              <g fill="#000">
+                {[[36, 2.6, 1.1], [80, 2.2, 0.8], [2.4, 30, 0.9], [2.6, 58, 1], [117.4, 24, 0.7],
+                  [118, 51, 1], [12, 79.4, 0.9], [62, 80, 0.7], [88, 79.6, 1]].map(([cx, cy, r]) => (
+                  <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={r} />
+                ))}
+              </g>
+            </mask>
+          </defs>
+          <rect x="2.4" y="2.4" width="115.2" height="77.2" rx="11.5" fill="none" stroke="#0F766E"
+            strokeWidth="4.6" mask={`url(#${ink})`} />
+        </>
+      )}
+      <g fill="none" stroke="#0F766E" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10 41.4 C 30 12, 89 12, 109.6 41.4" />
+        <path d="M10 41.4 C 24 55, 38 66, 52.6 64.4 A 21.5 21.5 0 1 1 65.6 64.4 C 80 66, 95 55, 109.6 41.4" />
       </g>
-      <circle cx="14" cy="16" r="2.2" fill="#0d9488" />
-      <circle cx="26" cy="15" r="2.2" fill="#b4532a" />
-      <circle cx="20" cy="21" r="2.6" fill="#0f766e" />
-      <circle cx="20" cy="28" r="2" fill="#d97745" />
+      <circle cx="59.1" cy="38.2" r="6.3" fill="#B4532A" />
+      <path d="M56.6 41.5 H61.6 L65 54.6 H53.2 Z" fill="#B4532A" />
     </svg>
   );
 }
 
 export function Logo({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
-  const mark = { sm: "h-7 w-7", md: "h-8 w-8", lg: "h-11 w-11" }[size];
-  const text = { sm: "text-base", md: "text-lg", lg: "text-2xl" }[size];
+  const mark = { sm: "h-7 w-10", md: "h-8 w-12", lg: "h-11 w-16" }[size];
+  const text = { sm: "text-[1.05rem]", md: "text-xl", lg: "text-[1.7rem]" }[size];
   return (
     <span className="inline-flex items-center gap-2.5">
       <LogoMark className={mark} />
-      <span className={`display ${text} tracking-tight text-ink`}>
-        Aegis<span className="text-gradient">RAG</span>
+      <span className={`${text} font-bold leading-none tracking-[-0.01em] text-[#1B2840]`}
+        style={{ fontFamily: '"Outfit Variable", "Space Grotesk Variable", sans-serif' }}>
+        Eyes Only
       </span>
     </span>
   );

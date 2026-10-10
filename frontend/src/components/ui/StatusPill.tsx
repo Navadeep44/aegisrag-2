@@ -1,9 +1,11 @@
 interface StatusPillProps {
   status: string;
   size?: "sm" | "md";
+  percent?: number;
+  stage?: string;
 }
 
-export function StatusPill({ status, size = "sm" }: StatusPillProps) {
+export function StatusPill({ status, size = "sm", percent, stage }: StatusPillProps) {
   const norm = status.toLowerCase();
 
   let colorClasses = "bg-surface-subtle text-ink-light border-line";
@@ -20,7 +22,13 @@ export function StatusPill({ status, size = "sm" }: StatusPillProps) {
   } else if (norm === "pending" || norm === "processing" || norm === "queued" || norm === "abstained") {
     colorClasses = "bg-warn-bg text-warn border-warn-border";
     dotColor = "bg-warn";
-    label = norm === "abstained" ? "No source" : status;
+    if (norm === "abstained") {
+      label = "No source";
+    } else if (norm === "processing") {
+      label = percent !== undefined ? `Processing ${percent}%` : "Processing";
+    } else {
+      label = status;
+    }
   } else if (norm === "flagged" || norm === "denied" || norm === "failed" || norm === "rejected" || norm === "deactivated" || norm === "suspended" || norm === "refused" || norm === "redacted") {
     colorClasses = "bg-deny-bg text-deny border-deny-border";
     dotColor = "bg-deny";
@@ -33,7 +41,14 @@ export function StatusPill({ status, size = "sm" }: StatusPillProps) {
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border font-semibold tracking-wide ${sizeClasses} ${colorClasses}`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${dotColor}`} />
+      {norm === "processing" ? (
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+        </span>
+      ) : (
+        <span className={`h-1.5 w-1.5 rounded-full ${dotColor}`} />
+      )}
       <span className="capitalize">{label}</span>
     </span>
   );

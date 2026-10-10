@@ -1,5 +1,5 @@
 """
-High-fidelity page renderer for AegisRAG.
+High-fidelity page renderer for Eyes Only.
 Generates optical PNG page previews for all file types: PDF, images, XLSX spreadsheets, TXT/MD, CSV, and fallback chunks.
 """
 from pathlib import Path
@@ -67,7 +67,7 @@ def _render_text_document(title: str, text: str, page_number: int, out_path: Pat
         
         # Footer
         page.draw_line((40, PAGE_A4.height - 40), (PAGE_A4.width - 40, PAGE_A4.height - 40), color=(0.85, 0.85, 0.88), width=0.5)
-        page.insert_text((50, PAGE_A4.height - 25), "AegisRAG Verified Document Preview", fontsize=8, fontname="helv", color=(0.5, 0.5, 0.55))
+        page.insert_text((50, PAGE_A4.height - 25), "Eyes Only Verified Document Preview", fontsize=8, fontname="helv", color=(0.5, 0.5, 0.55))
         page.insert_text((PAGE_A4.width - 110, PAGE_A4.height - 25), f"Page {curr_page} of {total_pages}", fontsize=8, fontname="helv", color=(0.5, 0.5, 0.55))
         
         png = page.get_pixmap(dpi=150).tobytes("png")
@@ -141,7 +141,7 @@ def _render_xlsx_sheet(path: Path, page_number: int, out_path: Path, title: str 
         # Footer
         page.draw_line((40, PAGE_A4.height - 40), (PAGE_A4.width - 40, PAGE_A4.height - 40), color=(0.85, 0.85, 0.88), width=0.5)
         page.insert_text((50, PAGE_A4.height - 25), f"Sheet {sheet_idx + 1} of {len(sheet_names)}: {sheet.title}", fontsize=8, fontname="helv", color=(0.5, 0.5, 0.55))
-        page.insert_text((PAGE_A4.width - 110, PAGE_A4.height - 25), "AegisRAG Catalog", fontsize=8, fontname="helv", color=(0.5, 0.5, 0.55))
+        page.insert_text((PAGE_A4.width - 110, PAGE_A4.height - 25), "Eyes Only Catalog", fontsize=8, fontname="helv", color=(0.5, 0.5, 0.55))
         
         png = page.get_pixmap(dpi=150).tobytes("png")
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -184,7 +184,7 @@ def render_document_page(doc, page_number: int, original_path: Path, out_path: P
     # Generic fallback
     return _render_text_document(
         doc.title,
-        f"Document: {doc.title}\nFilename: {doc.filename}\nPage: {page_number}\n\nDocument text indexed in AegisRAG vector catalog.",
+        f"Document: {doc.title}\nFilename: {doc.filename}\nPage: {page_number}\n\nDocument text indexed in Eyes Only vector catalog.",
         page_number,
         out_path,
         classification_label="Internal"

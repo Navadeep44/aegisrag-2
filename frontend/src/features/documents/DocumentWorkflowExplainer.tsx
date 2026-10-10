@@ -120,7 +120,7 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
     details: {
       heading: "Security Inside the Database Query",
       description:
-        "Unlike naive RAG systems that filter out forbidden documents after retrieving them, AegisRAG injects permission checks directly into the database retrieval statement. Unauthorized chunks never touch the AI context window.",
+        "Unlike naive RAG systems that filter out forbidden documents after retrieving them, Eyes Only injects permission checks directly into the database retrieval statement. Unauthorized chunks never touch the AI context window.",
       bullets: [
         "4 Clearance levels: Public (L0), Internal (L1), Confidential (L2), Restricted (L3)",
         "Row-level security policies (e.g., General employee sees only their dept rows; Finance sees all)",
@@ -194,7 +194,7 @@ export function DocumentWorkflowExplainer({
             transition={{ delay: 0.1 }}
             className="mx-auto mt-3 max-w-2xl text-base text-muted"
           >
-            How AegisRAG transforms unstructured enterprise files into permission-enforced,
+            How Eyes Only transforms unstructured enterprise files into permission-enforced,
             hallucination-free intelligence.
           </motion.p>
         </div>
@@ -312,7 +312,7 @@ export function DocumentWorkflowExplainer({
                   </span>
                   <div>
                     <p className="text-xs font-bold text-ink">{currentStage.title}</p>
-                    <p className="text-[10px] text-muted">AegisRAG Core Engine</p>
+                    <p className="text-[10px] text-muted">Eyes Only Core Engine</p>
                   </div>
                 </div>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-allow/30 bg-allow/10 px-2.5 py-0.5 text-[10px] font-bold text-allow">

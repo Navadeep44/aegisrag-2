@@ -1,4 +1,4 @@
-"""Deterministic Answer Validation Layer for AegisRAG.
+"""Deterministic Answer Validation Layer for Eyes Only.
 
 Enforces strict compliance with:
 1. Entity-Type Correctness (Requested Entity ≈ Returned Entity; no sections for entities)

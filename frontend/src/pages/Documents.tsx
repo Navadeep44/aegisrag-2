@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Upload,
   Search,
@@ -41,6 +41,7 @@ import { DocumentWorkflowExplainer } from "../features/documents/DocumentWorkflo
 import { kindStyle } from "../lib/kinds";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
+import { useWebSocketEvent } from "../context/WebSocketContext";
 import { api, imageUrl, post } from "../lib/api";
 import type { Department, Doc, DocStatus, FlaggedDoc, Grant, Role, SectionMeta, User } from "../lib/types";
 import { hasPermission } from "../lib/types";
@@ -90,6 +91,9 @@ export default function Documents() {
   const [previewImgUrl, setPreviewImgUrl] = useState<string | null>(null);
   const [previewImgLoading, setPreviewImgLoading] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
+  const [isPreviewDragging, setIsPreviewDragging] = useState(false);
+  const previewDragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
   // Ingestion job status
   const [jobStatus, setJobStatus] = useState<DocStatus | null>(null);
@@ -149,7 +153,43 @@ export default function Documents() {
     }
   }, [canManage, isDeptLead]);
 
-  // Polling when background processing
+  // Real-time WebSocket subscriptions - eliminates manual browser refreshing
+  useWebSocketEvent("document.status_changed", (ev) => {
+    setDocs((prev) =>
+      prev
+        ? prev.map((d) =>
+            d.id === ev.document_id
+              ? {
+                  ...d,
+                  status: ev.status || (ev.stage === "complete" ? "active" : d.status),
+                  stage: ev.stage || d.stage,
+                  progress_percent: ev.percent !== undefined ? ev.percent : (ev.stage === "complete" ? 100 : d.progress_percent),
+                }
+              : d
+          )
+        : prev
+    );
+    if (ev.status === "active" || ev.stage === "complete") {
+      load();
+    }
+    if (selectedDoc && ev.document_id === selectedDoc.id) {
+      setJobStatus((prev) =>
+        prev
+          ? {
+              ...prev,
+              stage: ev.stage || prev.stage,
+              status: ev.status || prev.status,
+              percent: ev.percent !== undefined ? ev.percent : prev.percent,
+            }
+          : null
+      );
+    }
+  });
+  useWebSocketEvent("document.created", () => load());
+  useWebSocketEvent("document.deleted", () => load());
+  useWebSocketEvent("document.access_changed", () => load());
+
+  // Polling backup when background processing
   useEffect(() => {
     if (!docs?.some((d) => d.status === "processing")) return;
     const timer = setTimeout(load, 2500);
@@ -164,6 +204,7 @@ export default function Documents() {
     }
     setPreviewImgLoading(true);
     setPreviewZoom(1);
+    setPreviewPan({ x: 0, y: 0 });
     let cancelled = false;
     const pageToLoad = Math.max(1, previewPage);
     imageUrl(`/documents/${selectedDoc.id}/pages/${pageToLoad}`)
@@ -378,6 +419,40 @@ export default function Documents() {
   const processingCount = (docs || []).filter((d) => d.status === "processing").length;
   const flaggedCount = (docs || []).filter((d) => d.flagged || d.status === "flagged").length;
 
+  const handlePreviewWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.2 : -0.2;
+    setPreviewZoom((z) => Math.min(4, Math.max(0.5, +(z + delta).toFixed(2))));
+  };
+
+  const handlePreviewMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setIsPreviewDragging(true);
+    previewDragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      panX: previewPan.x,
+      panY: previewPan.y,
+    };
+  };
+
+  const handlePreviewMouseMove = (e: React.MouseEvent) => {
+    if (!isPreviewDragging) return;
+    setPreviewPan({
+      x: previewDragStartRef.current.panX + (e.clientX - previewDragStartRef.current.x),
+      y: previewDragStartRef.current.panY + (e.clientY - previewDragStartRef.current.y),
+    });
+  };
+
+  const handlePreviewDoubleClick = () => {
+    if (previewZoom > 1 || previewPan.x !== 0 || previewPan.y !== 0) {
+      setPreviewZoom(1);
+      setPreviewPan({ x: 0, y: 0 });
+    } else {
+      setPreviewZoom(2);
+    }
+  };
+
   return (
     <div className="space-y-5 pb-16">
       <PageHeader
@@ -508,9 +583,33 @@ export default function Documents() {
                   </div>
                   {doc.readable ? <Eye className="h-4 w-4 text-allow" aria-label="You can read this" /> : <Shield className="h-4 w-4 text-muted-light" aria-label="You manage but cannot read this" />}
                 </div>
+
+                {/* Processing Progress Bar on Card */}
+                {doc.status === "processing" && (
+                  <div className="mt-2.5 rounded-lg border border-amber-200/70 bg-amber-50/80 dark:bg-amber-950/20 p-2 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] font-medium text-amber-900 dark:text-amber-300">
+                      <span className="flex items-center gap-1.5 capitalize font-mono text-[10px]">
+                        <RefreshCw className="h-3 w-3 animate-spin text-amber-600" />
+                        {doc.stage ? `${doc.stage} stage…` : "Ingesting…"}
+                      </span>
+                      <span className="font-mono font-bold text-amber-700 dark:text-amber-400">
+                        {doc.progress_percent ?? 35}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-amber-200/60 dark:bg-amber-900/40">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-600 transition-all duration-300 ease-out"
+                        style={{ width: `${Math.max(10, doc.progress_percent ?? 35)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="mt-3 flex flex-wrap items-center gap-1.5">
                   <ClearancePill clearance={doc.classification} label={doc.classification_label} />
-                  {doc.status !== "active" && <StatusPill status={doc.status} />}
+                  {doc.status !== "active" && (
+                    <StatusPill status={doc.status} percent={doc.progress_percent} stage={doc.stage} />
+                  )}
                   {doc.flagged && <span className="chip text-warn"><AlertTriangle className="h-3 w-3" /> injection removed</span>}
                   {doc.row_policy?.column && <span className="chip text-emerald-700"><Layers className="h-3 w-3" /> row rules</span>}
                   {canManage && <span className="chip max-w-[160px] truncate"><UserPlus className="h-3 w-3" /> {getSharedWithSummary(doc)}</span>}
@@ -847,9 +946,12 @@ export default function Documents() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setPreviewZoom(1)}
+                            onClick={() => {
+                              setPreviewZoom(1);
+                              setPreviewPan({ x: 0, y: 0 });
+                            }}
                             className="rounded p-1 text-muted hover:bg-surface-hover hover:text-ink transition-colors"
-                            title="Reset zoom"
+                            title="Reset zoom and position"
                           >
                             <RotateCcw className="h-3.5 w-3.5" />
                           </button>
@@ -867,23 +969,41 @@ export default function Documents() {
                     </div>
                   </div>
 
-                  <div className="flex min-h-[380px] max-h-[600px] items-center justify-center rounded-xl border border-line bg-page p-3 shadow-inner overflow-auto">
+                  <div
+                    onWheel={handlePreviewWheel}
+                    onMouseDown={handlePreviewMouseDown}
+                    onMouseMove={handlePreviewMouseMove}
+                    onMouseUp={() => setIsPreviewDragging(false)}
+                    onMouseLeave={() => setIsPreviewDragging(false)}
+                    onDoubleClick={handlePreviewDoubleClick}
+                    className="group relative select-none flex min-h-[380px] max-h-[600px] items-center justify-center rounded-xl border border-line bg-page p-3 shadow-inner overflow-hidden"
+                    style={{ cursor: isPreviewDragging ? "grabbing" : previewZoom > 1 ? "grab" : "default" }}
+                  >
                     {previewImgLoading ? (
                       <div className="flex flex-col items-center gap-2 p-8 text-xs text-muted">
                         <RefreshCw className="h-5 w-5 animate-spin text-accent" />
                         <span>Rendering optical page scan…</span>
                       </div>
                     ) : previewImgUrl ? (
-                      <img
-                        src={previewImgUrl}
-                        alt={`Page ${previewPage} of ${selectedDoc.title}`}
-                        style={{
-                          transform: `scale(${previewZoom})`,
-                          transformOrigin: "top center",
-                          transition: "transform 0.15s ease-out",
-                        }}
-                        className="max-h-[540px] w-full object-contain rounded-lg border border-line shadow-xs"
-                      />
+                      <>
+                        <div
+                          style={{
+                            transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom})`,
+                            transformOrigin: "center center",
+                            transition: isPreviewDragging ? "none" : "transform 0.15s ease-out",
+                          }}
+                          className="inline-block max-w-full"
+                        >
+                          <img
+                            src={previewImgUrl}
+                            alt={`Page ${previewPage} of ${selectedDoc.title}`}
+                            className="max-h-[540px] w-full object-contain rounded-lg border border-line shadow-xs pointer-events-none select-none"
+                          />
+                        </div>
+                        <div className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-black/60 px-2 py-1 text-[10px] text-white/90 backdrop-blur-xs opacity-75 group-hover:opacity-100 transition-opacity">
+                          {Math.round(previewZoom * 100)}% · Wheel to zoom · Drag to pan · Double-click to toggle
+                        </div>
+                      </>
                     ) : (
                       <div className="p-8 text-center text-xs text-muted space-y-2">
                         <FileText className="h-8 w-8 mx-auto text-muted/60" />
@@ -906,12 +1026,22 @@ export default function Documents() {
                   </div>
                   <div className="flex justify-between py-1.5 border-b border-line">
                     <span className="text-muted">Status:</span>
-                    <StatusPill status={selectedDoc.status} />
+                    <StatusPill
+                      status={selectedDoc.status}
+                      percent={jobStatus?.percent ?? (selectedDoc.status === "active" ? 100 : selectedDoc.progress_percent)}
+                      stage={jobStatus?.stage || selectedDoc.stage}
+                    />
                   </div>
                   <div className="flex justify-between py-1.5 border-b border-line">
                     <span className="text-muted">Pipeline Stage:</span>
                     <span className="font-semibold text-accent capitalize">
-                      {jobStatus?.stage || "Indexing Complete"}
+                      {jobStatus?.stage || selectedDoc.stage || "Indexing Complete"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1.5 border-b border-line">
+                    <span className="text-muted">Processing Progress:</span>
+                    <span className="font-mono font-bold text-ink">
+                      {jobStatus?.percent ?? (selectedDoc.status === "active" ? 100 : selectedDoc.progress_percent ?? 50)}%
                     </span>
                   </div>
                   <div className="flex justify-between py-1.5 border-b border-line">

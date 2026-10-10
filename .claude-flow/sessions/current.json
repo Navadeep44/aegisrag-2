@@ -1,12 +1,13 @@
 {
-  "id": "session-1791562770419",
-  "startedAt": "2026-10-09T16:19:30.419Z",
+  "id": "session-1791601074063",
+  "startedAt": "2026-10-10T02:57:54.063Z",
   "cwd": "/Users/navadeep/Downloads/aegisrag 2",
   "context": {},
   "metrics": {
-    "edits": 3,
+    "edits": 0,
     "commands": 0,
     "tasks": 0,
     "errors": 0
-  }
+  },
+  "restoredAt": "2026-10-10T04:29:27.919Z"
 }

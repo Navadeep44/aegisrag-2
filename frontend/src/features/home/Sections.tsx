@@ -92,7 +92,7 @@ export function Modalities() {
           One unified index. <span className="text-gradient">Every format.</span>
         </h2>
         <p className="mx-auto mt-3 max-w-2xl text-base text-muted">
-          No matter how your enterprise data lives, AegisRAG extracts, verifies, and indexes it
+          No matter how your enterprise data lives, Eyes Only extracts, verifies, and indexes it
           with cryptographic security isolation.
         </p>
       </div>

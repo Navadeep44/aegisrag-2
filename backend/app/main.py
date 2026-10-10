@@ -21,5 +21,5 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AegisRAG API", lifespan=lifespan)
+app = FastAPI(title="Eyes Only API", lifespan=lifespan)
 app.include_router(router)

@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -16,8 +16,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app import audit, chat, ingestion, page_renderer, retrieval, row_security
+from app.ws import manager
 from app.auth import (
     current_user,
+    get_user_from_token,
     hash_password,
     make_token,
     require_admin,
@@ -69,6 +71,7 @@ class QueryIn(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     conversation_id: str | None = None
     briefing_mode: bool = False
+    document_ids: list[str] | None = None
 
 
 class Grant(BaseModel):
@@ -265,7 +268,20 @@ def user_out(u: User, dept_map: dict | None = None) -> dict:
     }
 
 
-def doc_out(d: Document, with_access: bool = False, labels: dict | None = None) -> dict:
+STAGE_PERCENT = {
+    "queued": 15,
+    "validation": 25,
+    "extraction": 50,
+    "sanitization": 75,
+    "embedding": 90,
+    "complete": 100,
+    "failed": 0,
+}
+
+
+def doc_out(d: Document, with_access: bool = False, labels: dict | None = None, job: IngestionJob | None = None) -> dict:
+    stage = job.stage if job else ("complete" if d.status == "active" else "validation")
+    percent = 100 if d.status == "active" else (0 if d.status in ("failed", "error") else STAGE_PERCENT.get(stage, 25))
     out = {
         "id": d.id,
         "title": d.title,
@@ -274,6 +290,8 @@ def doc_out(d: Document, with_access: bool = False, labels: dict | None = None) 
         "classification": d.classification,
         "classification_label": LEVELS[d.classification] if 0 <= d.classification < len(LEVELS) else "Unknown",
         "status": d.status,
+        "stage": stage,
+        "progress_percent": percent,
         "note": d.note,
         "page_count": d.page_count,
         "flagged": d.flagged,
@@ -351,6 +369,33 @@ def health() -> dict:
 @router.get("/ready")
 def ready() -> dict:
     return {"status": "ready", "ai_provider": settings.ai_provider, **database_status()}
+
+
+# ---------- real-time websocket endpoint ----------
+
+@router.websocket("/ws")
+async def websocket_updates(
+    websocket: WebSocket,
+    token: str = Query(""),
+    db: Session = Depends(get_db),
+):
+    """Establishes real-time duplex channel for instant status notifications."""
+    user = get_user_from_token(db, token) if token else None
+    if not user:
+        await websocket.close(code=1008)
+        return
+    await manager.connect(websocket, user.tenant_id)
+    try:
+        await websocket.send_text(json.dumps({"type": "connected", "tenant_id": user.tenant_id}))
+        while True:
+            text = await websocket.receive_text()
+            if text == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
+
 
 
 # ---------- authentication & lifecycle ----------
@@ -1062,6 +1107,10 @@ def create_access_request(
         resource_id=req.resource_id,
         target_user_id=req.target_user_id,
     )
+    try:
+        manager.broadcast_sync(user.tenant_id, {"type": "access_request.created", "id": req.id, "requester_id": req.requester_id})
+    except Exception:
+        pass
     return {
         "id": req.id,
         "requester_id": req.requester_id,
@@ -1228,6 +1277,16 @@ def decide_access_request(
         resource_type=req.resource_type,
         resource_id=req.resource_id,
     )
+    try:
+        manager.broadcast_sync(approver.tenant_id, {
+            "type": "access_request.decided",
+            "id": req.id,
+            "decision": req.decision,
+            "resource_id": req.resource_id,
+            "target_user_id": grant_target_id,
+        })
+    except Exception:
+        pass
     return {
         "id": req.id,
         "decision": req.decision,
@@ -1249,15 +1308,21 @@ def list_documents(user: User = Depends(current_user), db: Session = Depends(get
             .group_by(Chunk.document_id)
         ).all()
     )
+    jobs = dict(
+        db.execute(
+            select(IngestionJob.document_id, IngestionJob)
+            .where(IngestionJob.tenant_id == user.tenant_id)
+        ).all()
+    )
     can_manage = user.has_permission("document.grant.manage") or user.has_permission("document.upload") or user.is_admin
     if can_manage:
         docs = db.execute(select(Document).where(Document.tenant_id == user.tenant_id)
                           .order_by(Document.title)).scalars().all()
         readable = readable_document_ids(db, user)
         labels = _labels(db, user.tenant_id)
-        return [{**doc_out(d, True, labels), "readable": d.id in readable, "chunk_count": chunk_counts.get(d.id, 0)} for d in docs]
+        return [{**doc_out(d, True, labels, jobs.get(d.id)), "readable": d.id in readable, "chunk_count": chunk_counts.get(d.id, 0)} for d in docs]
     docs = db.execute(select(Document).where(readable_clause(user)).order_by(Document.title))
-    return [{**doc_out(d), "readable": True, "chunk_count": chunk_counts.get(d.id, 0)} for d in docs.scalars()]
+    return [{**doc_out(d, False, None, jobs.get(d.id)), "readable": True, "chunk_count": chunk_counts.get(d.id, 0)} for d in docs.scalars()]
 
 
 @router.get("/documents/scoreboard")
@@ -1336,6 +1401,10 @@ def upload_document(
     ingestion.store_original(doc, data)
     background.add_task(ingestion.process_document, doc.id)
     audit.log(db, actor.tenant_id, actor.id, "document.upload", "allowed", document_id=doc.id)
+    try:
+        manager.broadcast_sync(actor.tenant_id, {"type": "document.created", "document_id": doc.id, "title": doc.title})
+    except Exception:
+        pass
     return doc_out(doc, True, _labels(db, actor.tenant_id))
 
 
@@ -1364,6 +1433,10 @@ def update_access(
         grants=[[g.subject_type, g.subject_id] for g in doc.access],
         classification=doc.classification,
     )
+    try:
+        manager.broadcast_sync(actor.tenant_id, {"type": "document.access_changed", "document_id": doc.id})
+    except Exception:
+        pass
     db.refresh(doc)
     return doc_out(doc, True, _labels(db, actor.tenant_id))
 
@@ -1515,6 +1588,10 @@ def delete_document(
     db.delete(doc)
     db.commit()
     audit.log(db, actor.tenant_id, actor.id, "document.delete", "allowed", document_id=document_id)
+    try:
+        manager.broadcast_sync(actor.tenant_id, {"type": "document.deleted", "document_id": document_id})
+    except Exception:
+        pass
     return {"deleted": document_id}
 
 
@@ -1528,11 +1605,14 @@ def document_status(
     if not doc or doc.tenant_id != user.tenant_id:
         raise HTTPException(404, "Document not found.")
     job = db.execute(select(IngestionJob).where(IngestionJob.document_id == doc.id)).scalars().first()
+    stage = job.stage if job else ("complete" if doc.status == "active" else doc.status)
+    percent = 100 if doc.status == "active" else (0 if doc.status in ("failed", "error") else STAGE_PERCENT.get(stage, 25))
     return {
         "document_id": doc.id,
         "status": doc.status,
         "job_status": job.status if job else doc.status,
-        "stage": job.stage if job else ("complete" if doc.status == "active" else doc.status),
+        "stage": stage,
+        "percent": percent,
         "note": doc.note,
         "page_count": doc.page_count,
         "version": doc.version,
@@ -1579,6 +1659,9 @@ def page_image(
     return FileResponse(path, media_type="image/png")
 
 
+_highlights_cache: dict[tuple[str, int, str], list[list[float]]] = {}
+
+
 @router.get("/documents/{document_id}/pages/{page}/highlights")
 def page_highlights(
     document_id: str,
@@ -1587,32 +1670,107 @@ def page_highlights(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Boxes (0-1 page coordinates) around the cited sentence on a PDF page, so a
-    citation opens on the exact words it relies on. Same 404 rule as page images."""
+    """Boxes (0-1 page coordinates) around the cited sentence on a PDF or image page,
+    so a citation opens on the exact words it relies on. Same 404 rule as page images."""
     if not can_read(db, user, document_id):
         raise HTTPException(404, "Document not found.")
     doc = db.get(Document, document_id)
-    q = re.sub(r"\s+", " ", q or "").strip()[:400]
-    if not doc or doc.kind != "pdf" or len(q) < 4:
+    if not doc or len(q or "") < 3:
         return {"rects": []}
-    path = ingestion.doc_dir(doc) / ("original" + Path(doc.filename).suffix.lower())
+
+    cache_key = (document_id, page, q[:200])
+    if cache_key in _highlights_cache:
+        return {"rects": _highlights_cache[cache_key]}
+
+    clean_q = re.sub(r"[\"'\*#\(\)\[\]]", " ", q)
+    clean_q = re.sub(r"\s+", " ", clean_q).strip()
+
+    rects = []
     try:
-        import pymupdf
-        with pymupdf.open(path) as pdf:
-            if not 1 <= page <= len(pdf):
-                return {"rects": []}
-            pg = pdf[page - 1]
-            found = pg.search_for(q)
-            if not found:
-                words = q.split()
-                for i in range(0, len(words), 6):
-                    piece = " ".join(words[i : i + 6])
-                    if len(piece) > 6:
-                        found += pg.search_for(piece)
-            w, h = pg.rect.width, pg.rect.height
-            return {"rects": [[r.x0 / w, r.y0 / h, r.x1 / w, r.y1 / h] for r in found[:40]]}
+        if doc.kind == "pdf":
+            path = ingestion.doc_dir(doc) / ("original" + Path(doc.filename).suffix.lower())
+            import pymupdf
+            with pymupdf.open(path) as pdf:
+                if 1 <= page <= len(pdf):
+                    pg = pdf[page - 1]
+                    w, h = pg.rect.width, pg.rect.height
+                    # 1. Try direct search of full clean phrase
+                    found = pg.search_for(clean_q)
+                    # 2. Try searching by sub-clauses
+                    if not found:
+                        clauses = [c.strip() for c in re.split(r"[,\.;\n]", clean_q) if len(c.strip().split()) >= 3]
+                        for c in clauses:
+                            found = pg.search_for(c)
+                            if found:
+                                break
+                    # 3. Try substantive word pairs/runs
+                    if not found:
+                        words = [w for w in clean_q.split() if len(w) > 3 and w.lower() not in {
+                            "that", "with", "this", "from", "they", "their", "there", "have", "were", "been"
+                        }]
+                        if len(words) >= 2:
+                            for i in range(len(words) - 1):
+                                pair = f"{words[i]} {words[i+1]}"
+                                f = pg.search_for(pair)
+                                if f:
+                                    found.extend(f)
+                                    if len(found) >= 4:
+                                        break
+                    if found:
+                        rects = [[round(r.x0 / w, 4), round(r.y0 / h, 4), round(r.x1 / w, 4), round(r.y1 / h, 4)] for r in found[:30]]
+
+        elif doc.kind == "image":
+            # Image highlight via page 1 PNG and RapidOCR box matching
+            p_img = ingestion.page_image_path(doc, page)
+            if p_img.is_file():
+                import pymupdf
+                pix = pymupdf.Pixmap(str(p_img))
+                w, h = pix.width, pix.height
+                ocr_eng = ocr.get_ocr_engine()
+                if ocr_eng:
+                    res, _ = ocr_eng(p_img.read_bytes())
+                    if res:
+                        q_lower = clean_q.lower()
+                        stopwords = {
+                            "the", "and", "for", "with", "from", "that", "this", "have", "were", "been",
+                            "they", "their", "there", "what", "when", "where", "which", "will", "would",
+                            "could", "should", "your", "about", "into", "over", "after", "also", "page"
+                        }
+                        q_words = {w.lower() for w in re.findall(r"\b\w+\b", clean_q) if len(w) > 2 and w.lower() not in stopwords}
+                        found_boxes = []
+
+                        # Pass 1: exact substring match
+                        for box, text, conf in res:
+                            t_lower = text.lower().strip()
+                            if len(t_lower) >= 3 and (t_lower in q_lower or q_lower in t_lower):
+                                x0 = min(pt[0] for pt in box)
+                                y0 = min(pt[1] for pt in box)
+                                x1 = max(pt[0] for pt in box)
+                                y1 = max(pt[1] for pt in box)
+                                found_boxes.append([round(x0 / w, 4), round(y0 / h, 4), round(x1 / w, 4), round(y1 / h, 4)])
+
+                        # Pass 2: if few exact matches, match meaningful keyword tokens
+                        if len(found_boxes) < 2 and q_words:
+                            for box, text, conf in res:
+                                t_words = {w.lower() for w in re.findall(r"\b\w+\b", text) if len(w) > 2 and w.lower() not in stopwords}
+                                overlap = q_words & t_words
+                                if overlap and (len(overlap) >= 2 or len(overlap) / max(len(t_words), 1) >= 0.5):
+                                    x0 = min(pt[0] for pt in box)
+                                    y0 = min(pt[1] for pt in box)
+                                    x1 = max(pt[0] for pt in box)
+                                    y1 = max(pt[1] for pt in box)
+                                    coords = [round(x0 / w, 4), round(y0 / h, 4), round(x1 / w, 4), round(y1 / h, 4)]
+                                    if coords not in found_boxes:
+                                        found_boxes.append(coords)
+                        rects = found_boxes[:30]
     except Exception:
-        return {"rects": []}
+        pass
+
+    _highlights_cache[cache_key] = rects
+    if len(_highlights_cache) > 500:
+        _highlights_cache.clear()
+    return {"rects": rects}
+
 
 
 @router.put("/documents/{document_id}/row-policy")
@@ -1672,7 +1830,12 @@ def chat_query(
 ) -> dict:
     chat.check_rate_limit(user.id)
     return chat.answer_question(
-        db, user, body.question.strip(), body.conversation_id, briefing_mode=body.briefing_mode
+        db,
+        user,
+        body.question.strip(),
+        body.conversation_id,
+        briefing_mode=body.briefing_mode,
+        document_ids=body.document_ids,
     )
 
 
@@ -1964,6 +2127,7 @@ def get_unauthorized_queries(
             "user_name": u.name if u else (e.actor or "Unknown"),
             "user_email": u.email if u else "",
             "roles": roles or ["Employee"],
+            "user_roles": roles or ["Employee"],
             "question": q or "Query with no authorized sources found",
             "decision": "abstained",
             "suggested_resource": e.detail.get("suggested_resource") if e.detail else None,
