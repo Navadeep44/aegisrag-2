@@ -1,8 +1,10 @@
 import { Footer } from "../components/layout/Footer";
 import { PublicNav } from "../components/layout/PublicNav";
+import { Capabilities, GetStarted } from "../features/home/Capabilities";
+import { Formats } from "../features/home/Formats";
 import { Hero } from "../features/home/Hero";
+import { Pipeline } from "../features/home/Pipeline";
 import { SameQuestion } from "../features/home/SameQuestion";
-import { Modalities, PipelineStrip, Proof } from "../features/home/Sections";
 
 export default function Home() {
   return (
@@ -10,10 +12,11 @@ export default function Home() {
       <PublicNav />
       <main className="flex-1">
         <Hero />
-        <PipelineStrip />
+        <Formats />
+        <Pipeline />
         <SameQuestion />
-        <Modalities />
-        <Proof />
+        <Capabilities />
+        <GetStarted />
       </main>
       <Footer />
     </div>

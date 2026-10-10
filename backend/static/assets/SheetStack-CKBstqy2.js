@@ -1,4 +1,4 @@
-import{j as Io}from"./motion-BRYkXoG1.js";import{r as js}from"./vendor-C9Ks6Np1.js";/**
+import{j as Io}from"./motion-62fz_j2U.js";import{r as js}from"./vendor-C9Ks6Np1.js";/**
  * @license
  * Copyright 2010-2024 Three.js Authors
  * SPDX-License-Identifier: MIT

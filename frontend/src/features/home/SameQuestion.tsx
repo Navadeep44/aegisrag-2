@@ -1,280 +1,135 @@
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Calculator, CheckCircle2, SearchX, ShieldCheck } from "lucide-react";
+import { animate, AnimatePresence, motion, useInView, useMotionValue, useTransform } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { Calculator, Lock } from "lucide-react";
 
-interface PersonaData {
-  id: string;
-  name: string;
-  role: string;
-  level: string;
-  clearanceCode: number;
-  dept: string;
-  avatarRing: string;
-  queries: {
-    q: string;
-    status: "allowed" | "computed" | "withheld";
-    headline: string;
-    sourceCited: string;
-    sqlFilter: string;
-  }[];
-}
-
-const PERSONAS: PersonaData[] = [
-  {
-    id: "emil",
-    name: "Emil",
-    role: "General Employee",
-    level: "L1 Internal",
-    clearanceCode: 1,
-    dept: "General",
-    avatarRing: "from-blue-500 to-sky-400",
-    queries: [
-      {
-        q: "What was our total annual revenue?",
-        status: "withheld",
-        headline: "No authorized source",
-        sourceCited: "Revenue Report (L2) filtered out before retrieval",
-        sqlFilter: "WHERE classification <= 1 AND (tenant_id = 'acme')",
-      },
-      {
-        q: "Total approved expense claims?",
-        status: "computed",
-        headline: "$145.20",
-        sourceCited: "1 row · General department rows only",
-        sqlFilter: "WHERE (Department = 'General' OR full_access = true)",
-      },
-      {
-        q: "Executive salary bands for 2026?",
-        status: "withheld",
-        headline: "No authorized source",
-        sourceCited: "Salary Bands (L3) requires HR / Owner clearance",
-        sqlFilter: "WHERE classification <= 1 (L3 strictly withheld)",
-      },
-    ],
-  },
-  {
-    id: "farid",
-    name: "Farid",
-    role: "Finance Specialist",
-    level: "L2 Confidential",
-    clearanceCode: 2,
-    dept: "Finance",
-    avatarRing: "from-amber-500 to-orange-400",
-    queries: [
-      {
-        q: "What was our total annual revenue?",
-        status: "allowed",
-        headline: "$48.2 Million",
-        sourceCited: "FY2025 Revenue Report, Page 1",
-        sqlFilter: "WHERE classification <= 2 AND role IN ('finance', 'exec')",
-      },
-      {
-        q: "Total approved expense claims?",
-        status: "computed",
-        headline: "$34,266.45",
-        sourceCited: "12 rows aggregated across all departments",
-        sqlFilter: "WHERE role = 'finance' (Full cross-dept row access)",
-      },
-      {
-        q: "Executive salary bands for 2026?",
-        status: "withheld",
-        headline: "No authorized source",
-        sourceCited: "Salary Bands (L3) restricted to HR Department",
-        sqlFilter: "WHERE role IN ('hr') (Finance role lacks clearance)",
-      },
-    ],
-  },
-  {
-    id: "hema",
-    name: "Hema",
-    role: "HR Director",
-    level: "L3 Restricted",
-    clearanceCode: 3,
-    dept: "HR",
-    avatarRing: "from-rose-500 to-red-400",
-    queries: [
-      {
-        q: "What was our total annual revenue?",
-        status: "withheld",
-        headline: "No authorized source",
-        sourceCited: "Revenue Report restricted to Finance & Executive roles",
-        sqlFilter: "WHERE role IN ('finance', 'executive')",
-      },
-      {
-        q: "Total approved expense claims?",
-        status: "computed",
-        headline: "$1,840.00",
-        sourceCited: "3 rows · HR department claims only",
-        sqlFilter: "WHERE Department = 'HR'",
-      },
-      {
-        q: "Executive salary bands for 2026?",
-        status: "allowed",
-        headline: "Band E-1: $210K – $280K",
-        sourceCited: "Salary Bands 2026.xlsx, Sheet 1",
-        sqlFilter: "WHERE classification <= 3 AND role = 'hr'",
-      },
-    ],
-  },
+// The 16 rows of the seeded "Expense Claims 2025" table (approved amounts only count towards the total).
+const ROWS: [string, string, number, boolean][] = [
+  ["EXP-1001", "Engineering", 1840.0, true], ["EXP-1002", "Engineering", 2310.5, true],
+  ["EXP-1003", "Engineering", 3125.0, false], ["EXP-1004", "Engineering", 960.0, true],
+  ["EXP-1005", "HR", 1450.0, true], ["EXP-1006", "HR", 780.0, false], ["EXP-1007", "HR", 615.0, true],
+  ["EXP-1008", "Finance", 4200.0, true], ["EXP-1009", "Finance", 1320.0, false],
+  ["EXP-1010", "Executive", 890.75, true], ["EXP-1011", "Executive", 5600.0, true],
+  ["EXP-1012", "General", 145.2, true], ["EXP-1013", "General", 230.0, false],
+  ["EXP-1014", "IT", 6480.0, true], ["EXP-1015", "IT", 2275.0, true], ["EXP-1016", "Security", 7500.0, true],
 ];
 
-const STATUS_TONES = {
-  allowed: {
-    badge: "border-allow/30 bg-allow/10 text-allow",
-    icon: ShieldCheck,
-    title: "Authorized & Cited",
-  },
-  computed: {
-    badge: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
-    icon: Calculator,
-    title: "Exact Deterministic Math",
-  },
-  withheld: {
-    badge: "border-warn/30 bg-warn/10 text-warn",
-    icon: SearchX,
-    title: "Zero-Leakage Withheld",
-  },
-};
+const PEOPLE = [
+  { id: "emil", name: "Emil", role: "Employee · General", sees: (d: string) => d === "General", ring: "from-level-1 to-sky-300" },
+  { id: "esha", name: "Esha", role: "Engineer · Engineering", sees: (d: string) => d === "Engineering", ring: "from-level-2 to-amber-300" },
+  { id: "farid", name: "Farid", role: "Finance · all departments", sees: () => true, ring: "from-allow to-emerald-300" },
+];
+
+function Money({ value }: { value: number }) {
+  const mv = useMotionValue(0);
+  const text = useTransform(mv, (v) => `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  useEffect(() => {
+    const controls = animate(mv, value, { duration: 0.9, ease: [0.16, 1, 0.3, 1] });
+    return () => controls.stop();
+  }, [value, mv]);
+  return <motion.span>{text}</motion.span>;
+}
 
 export function SameQuestion() {
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string>("farid");
-  const selectedPersona =
-    PERSONAS.find((p) => p.id === selectedPersonaId) || PERSONAS[1];
+  const [who, setWho] = useState(PEOPLE[0]);
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-20% 0px" });
+
+  // Walk through the three people once when the section first appears.
+  useEffect(() => {
+    if (!inView) return;
+    const timers = [setTimeout(() => setWho(PEOPLE[1]), 2200), setTimeout(() => setWho(PEOPLE[2]), 4400)];
+    return () => timers.forEach(clearTimeout);
+  }, [inView]);
+
+  const visible = ROWS.filter((r) => who.sees(r[1]));
+  const total = visible.filter((r) => r[3]).reduce((s, r) => s + r[2], 0);
 
   return (
-    <section id="same-question" className="mx-auto max-w-7xl px-5 py-24 sm:px-8">
-      <div className="mb-12 text-center">
-        <span className="chip mb-3 border-accent/30 bg-accent-light text-accent">
-          <ShieldCheck className="h-3.5 w-3.5" /> Granular Access Control
-        </span>
-        <h2 className="display text-3xl text-ink sm:text-4xl lg:text-5xl">
+    <section id="same-question" className="relative mx-auto max-w-6xl px-5 py-24 sm:px-8 lg:py-28">
+      <div className="mx-auto max-w-2xl text-center">
+        <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Row-level access</p>
+        <h2 className="font-brand mt-4 text-4xl font-semibold leading-[1.05] text-ink sm:text-5xl">
           Same question. <span className="text-gradient">Different truth.</span>
         </h2>
-        <p className="mx-auto mt-3 max-w-2xl text-base text-muted">
-          Enterprise answers depend strictly on who is asking. Select a persona below to inspect
-          how the retrieval SQL and synthesized answers adapt in real time.
-        </p>
+        <p className="mt-4 text-ink-light">Each row of the expense table carries its own permission. Pick a person.</p>
       </div>
 
-      {/* Interactive Persona Tabs */}
-      <div className="mb-8 flex flex-wrap items-center justify-center gap-3">
-        {PERSONAS.map((p) => {
-          const isActive = p.id === selectedPersonaId;
-          return (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setSelectedPersonaId(p.id)}
-              className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-all duration-300 ${
-                isActive
-                  ? "glass-premium border-accent/60 shadow-md scale-105"
-                  : "border-line bg-surface/70 hover:border-accent/40 hover:bg-surface-hover/70"
-              }`}
-            >
-              <span
-                className={`grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br p-[2px] ${p.avatarRing}`}
-              >
-                <span className="display grid h-full w-full place-items-center rounded-[10px] bg-surface text-sm font-bold text-ink">
-                  {p.name[0]}
-                </span>
-              </span>
-              <div>
-                <p className="display text-sm font-bold text-ink">{p.name}</p>
-                <p className="text-[11px] text-muted">
-                  {p.role} · <span className="font-semibold text-accent">{p.level}</span>
-                </p>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Active Persona Query Results Grid */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={selectedPersona.id}
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -14 }}
-          transition={{ duration: 0.3 }}
-          className="glass-premium rounded-3xl border border-line/80 p-6 sm:p-10 shadow-xl"
-        >
-          {/* Header Bar */}
-          <div className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-line/70 pb-6">
-            <div className="flex items-center gap-3.5">
-              <span
-                className={`grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br p-[2px] ${selectedPersona.avatarRing}`}
-              >
-                <span className="display grid h-full w-full place-items-center rounded-[14px] bg-surface text-lg font-bold text-ink">
-                  {selectedPersona.name[0]}
-                </span>
-              </span>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="display text-xl font-bold text-ink">
-                    {selectedPersona.name}'s Search Scope
-                  </h3>
-                  <span className="chip border-line bg-surface text-[10px] font-bold text-accent">
-                    {selectedPersona.dept} Department
+      <div ref={ref} className="paper-card mt-12 overflow-hidden rounded-[28px]">
+        {/* Question bar + people */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line/70 px-5 py-4 sm:px-6">
+          <p className="text-sm text-ink-light">
+            <span className="mr-2 font-mono text-[11px] uppercase tracking-wider text-muted">Ask</span>
+            “What is the total amount of approved expense claims?”
+          </p>
+          <div role="tablist" aria-label="Person asking" className="flex gap-1 rounded-2xl bg-surface-subtle p-1">
+            {PEOPLE.map((p) => (
+              <button key={p.id} role="tab" aria-selected={who.id === p.id} onClick={() => setWho(p)}
+                className="relative rounded-xl px-3 py-2 text-left text-xs">
+                {who.id === p.id && (
+                  <motion.span layoutId="who" className="absolute inset-0 rounded-xl bg-surface shadow-sm" transition={{ type: "spring", stiffness: 420, damping: 34 }} />
+                )}
+                <span className="relative flex items-center gap-2">
+                  <span className={`grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br p-[1.5px] ${p.ring}`}>
+                    <span className="grid h-full w-full place-items-center rounded-full bg-surface text-[10px] font-bold text-ink">{p.name[0]}</span>
                   </span>
-                </div>
-                <p className="text-xs text-muted">
-                  Clearance Level {selectedPersona.clearanceCode} • Role-based & Row-level filtering enforced
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs text-muted">Retrieved via:</span>
-              <span className="chip border-accent/30 bg-accent-light font-mono text-xs font-bold text-accent">
-                FastAPI + SQLite FTS5 + Gemini Vectors
-              </span>
-            </div>
+                  <span className="font-semibold text-ink">{p.name}</span>
+                </span>
+              </button>
+            ))}
           </div>
+        </div>
 
-          {/* 3 Queries Side by Side or Vertical List */}
-          <div className="grid gap-5 md:grid-cols-3">
-            {selectedPersona.queries.map((q, idx) => {
-              const tone = STATUS_TONES[q.status];
-              const Icon = tone.icon;
+        <div className="grid lg:grid-cols-[1.35fr_1fr]">
+          {/* Rows */}
+          <div className="grid grid-cols-2 gap-2 p-5 sm:grid-cols-4 sm:p-6">
+            {ROWS.map(([id, dept, amount, approved]) => {
+              const ok = who.sees(dept);
               return (
-                <div
-                  key={q.q}
-                  className="flex flex-col justify-between rounded-2xl border border-line bg-surface p-5 shadow-xs transition-all hover:border-accent/40"
-                >
-                  <div>
-                    {/* Status Badge */}
-                    <div className="mb-3 flex items-center justify-between">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold ${tone.badge}`}>
-                        <Icon className="h-3 w-3" />
-                        <span>{tone.title}</span>
-                      </span>
-                      <span className="font-mono text-[10px] text-muted-light font-bold">
-                        Query 0{idx + 1}
-                      </span>
-                    </div>
-
-                    <p className="text-xs font-semibold text-muted">“{q.q}”</p>
-                    <p className="display mt-3 text-2xl font-bold text-ink">{q.headline}</p>
-                    <p className="mt-2 text-xs leading-relaxed text-ink-light">
-                      <CheckCircle2 className="inline h-3.5 w-3.5 text-accent mr-1 shrink-0" />
-                      {q.sourceCited}
-                    </p>
-                  </div>
-
-                  {/* SQL Filter Preview */}
-                  <div className="mt-5 rounded-xl border border-line bg-surface-subtle p-2.5 font-mono text-[10px] text-muted-light">
-                    <span className="block text-[9px] font-bold uppercase tracking-wider text-muted">
-                      Executed SQL Clause:
-                    </span>
-                    <span className="text-accent font-medium truncate block">{q.sqlFilter}</span>
-                  </div>
-                </div>
+                <motion.div key={id} layout animate={{ opacity: ok ? 1 : 0.55, filter: ok ? "blur(0px)" : "blur(1.5px)" }}
+                  transition={{ duration: 0.45 }}
+                  className={`relative rounded-xl border p-2.5 ${ok ? "border-accent/30 bg-accent-light/50" : "border-line bg-surface-subtle"}`}>
+                  <p className="font-mono text-[10px] text-muted">{id}</p>
+                  <p className="text-xs font-semibold text-ink">{dept}</p>
+                  <p className={`mt-1 font-mono text-[11px] ${approved ? "text-ink-light" : "text-muted line-through"}`}>
+                    ${amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  </p>
+                  <AnimatePresence>
+                    {!ok && (
+                      <motion.span initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }}
+                        className="absolute inset-0 grid place-items-center rounded-xl">
+                        <span className="grid h-7 w-7 place-items-center rounded-full bg-surface text-deny shadow-sm"><Lock className="h-3.5 w-3.5" /></span>
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
               );
             })}
           </div>
-        </motion.div>
-      </AnimatePresence>
+
+          {/* Answer */}
+          <div className="flex flex-col justify-center gap-5 border-t border-line/70 bg-[linear-gradient(180deg,#fffdf8,#f9f3e6)] p-6 lg:border-l lg:border-t-0 lg:p-8">
+            <div className="flex items-center gap-3">
+              <span className={`grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br p-[2px] ${who.ring}`}>
+                <span className="font-brand grid h-full w-full place-items-center rounded-full bg-surface text-lg font-semibold text-ink">{who.name[0]}</span>
+              </span>
+              <div>
+                <p className="font-brand text-lg font-semibold text-ink">{who.name}</p>
+                <p className="text-xs text-muted">{who.role}</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted">Answer</p>
+              <p className="font-brand mt-1 text-5xl font-semibold tabular-nums text-ink"><Money value={total} /></p>
+              <p className="mt-2 text-sm text-ink-light">
+                from <b className="text-ink">{visible.length}</b> of 16 rows the database returned for {who.name}
+              </p>
+            </div>
+            <p className="inline-flex items-center gap-2 self-start rounded-lg border border-emerald-600/20 bg-emerald-600/5 px-2.5 py-1.5 font-mono text-[11px] text-emerald-800">
+              <Calculator className="h-3.5 w-3.5" /> SUM(Amount) WHERE Status = Approved
+            </p>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
