@@ -19,7 +19,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app import audit, chat, ingestion, ocr, page_renderer, retrieval, row_security
+from app import audit, chat, ingestion, ocr, page_renderer, retrieval, row_security, section_access
 from app.ws import manager
 from app.auth import (
     current_user,
@@ -1447,6 +1447,7 @@ def get_document_sections(
             "preview": s.get("snippet", s.get("preview", "")),
             "snippet": s.get("snippet", s.get("preview", "")),
             "allowed_roles": s.get("allowed_roles", []),
+            "auto_assigned": bool(s.get("auto_assigned")),
         }
         for s in (doc.sections_metadata or [])
     ]
@@ -1457,6 +1458,23 @@ def get_document_sections(
         "sections": normalized_sections,
         "data_schema": doc.data_schema,
     }
+
+
+@router.post("/documents/{document_id}/sections/auto-assign")
+def auto_assign_sections(
+    document_id: str,
+    user: User = Depends(require_any_permission("document.grant.manage", "tenant.manage")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Re-run the automatic section-to-role assignment (replaces manual section choices)."""
+    doc = _tenant_document(db, user, document_id)
+    if not section_access.applies_to(doc):
+        raise HTTPException(400, "Spreadsheets and record tables use row rules instead of section rules.")
+    result = section_access.auto_assign(db, doc)
+    db.commit()
+    audit.log(db, user.tenant_id, user.id, "document.section_auto_assign", "allowed",
+              document_id=doc.id, restricted=result.get("restricted", 0))
+    return {"status": "ok", **result, "sections_metadata": doc.sections_metadata}
 
 
 @router.put("/documents/{document_id}/sections/{section_id}/access")
@@ -1476,6 +1494,7 @@ def update_section_access(
         s_dict = dict(sec)
         if s_dict.get("id") == section_id or s_dict.get("section_id") == section_id:
             s_dict["allowed_roles"] = list(body.allowed_roles)
+            s_dict["auto_assigned"] = False  # an admin's choice replaces the automatic one
             matched_section = s_dict
         new_sections.append(s_dict)
 
@@ -1570,7 +1589,7 @@ def delete_document(
     db: Session = Depends(get_db),
 ) -> dict:
     doc = _tenant_document(db, actor, document_id)
-    db.query(Chunk).filter(Chunk.document_id == doc.id).delete()
+    row_security.purge_document_chunks(db, doc.id)
     db.query(IngestionJob).filter(IngestionJob.document_id == doc.id).delete()
     ingestion.delete_files(doc)
     db.delete(doc)
@@ -2893,7 +2912,9 @@ def review_flagged_document(
         doc.note = f"Approved after quarantine review by {user.name}: {body.note or 'Verified safe'}"
         audit_action = "document.flagged.approved"
     else:
-        ingestion.delete_document_data(doc)
+        row_security.purge_document_chunks(db, doc.id)
+        db.query(IngestionJob).filter(IngestionJob.document_id == doc.id).delete()
+        ingestion.delete_files(doc)
         db.delete(doc)
         audit_action = "document.flagged.purged"
 

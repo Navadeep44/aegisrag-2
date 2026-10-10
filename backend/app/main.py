@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import router
 from app.config import settings
+from app import row_security
 from app.db import SessionLocal, init_db
 
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
     from app.reindex import migrate_legacy_section_rules
     with SessionLocal() as db:
         migrate_legacy_section_rules(db)
+        row_security.remove_orphans(db)
     yield
 
 

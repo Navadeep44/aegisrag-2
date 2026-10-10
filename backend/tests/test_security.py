@@ -52,7 +52,8 @@ def set_grants(client, headers, document_id, grants):
 
 def test_access_matrix(client, db):
     """Every user can read exactly the documents their roles and clearance allow"""
-    shared = {"Leave Policy", "IT Onboarding Notes", "Visitor Policy Notice (photo)", "Expense Claims 2025"}
+    shared = {"Leave Policy", "IT Onboarding Notes", "Visitor Policy Notice (photo)", "Expense Claims 2025",
+              "Company Handbook 2026"}
     expected = {
         ADMIN: shared,
         HR: shared | {"Salary Bands 2026"},

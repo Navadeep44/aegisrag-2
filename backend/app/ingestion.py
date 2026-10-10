@@ -15,7 +15,7 @@ import openpyxl
 import pymupdf
 from sqlalchemy import select
 
-from app import ai, audit, llm, ocr, page_renderer, row_security
+from app import ai, audit, llm, ocr, page_renderer, row_security, section_access
 from app.config import settings
 from app.db import SessionLocal
 from app.models import Chunk, Document, IngestionJob, Record, now
@@ -179,6 +179,24 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
                                 font_counts[round(s["size"], 1)] += len(t)
         body_size = font_counts.most_common(1)[0][0] if font_counts else 10.0
 
+        # Running headers and footers: short lines in the top or bottom margin that
+        # repeat on several pages (page numbers ignored). They are page furniture,
+        # not content, and would otherwise become a "section" on every page.
+        def _furniture_key(text: str) -> str:
+            return re.sub(r"\d+", "#", re.sub(r"\s+", " ", text)).strip().lower()
+
+        margin_seen: Counter[str] = Counter()
+        for page in pdf:
+            h = page.rect.height
+            keys = set()
+            for b in page.get_text("dict").get("blocks", []):
+                if "lines" in b and (b["bbox"][3] < 60 or b["bbox"][1] > h - 60):
+                    text = " ".join("".join(s["text"] for s in ln["spans"]) for ln in b["lines"])
+                    if 0 < len(text.strip()) < 160:
+                        keys.add(_furniture_key(text))
+            margin_seen.update(keys)
+        furniture = {k for k, n in margin_seen.items() if n >= 2} if len(pdf) > 1 else set()
+
         current_heading = doc.title or "Overview"
         heading_stack: list[tuple[int, str]] = []
         sec_counter = 1
@@ -190,9 +208,10 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
 
             # A chart or diagram: embedded images, or vector drawings that are not just table rules.
             try:
-                has_table = bool(page.find_tables().tables)
+                table_rects = [pymupdf.Rect(t.bbox) for t in page.find_tables().tables]
+                has_table = bool(table_rects)
             except Exception:
-                has_table = False
+                table_rects, has_table = [], False
             has_visuals = bool(page.get_images()) or (len(page.get_drawings()) >= 3 and not has_table)
             visual_desc = ""
             if len(raw_page_text) < 40:
@@ -218,6 +237,15 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
             current_section_buf: list[str] = []
 
             for b in text_blocks:
+                # Text inside a detected table is stored once, as a structured table
+                # chunk below; it is neither prose nor a heading.
+                block_rect = pymupdf.Rect(b["bbox"])
+                block_size = max((sp["size"] for ln in b["lines"] for sp in ln["spans"]), default=0)
+                in_table = table_rects and block_rect.get_area() and any(
+                    (block_rect & r).get_area() / block_rect.get_area() > 0.6 for r in table_rects)
+                # Larger type inside a table box is a heading the box happened to include.
+                if in_table and block_size < body_size * 1.3:
+                    continue
                 lines: list[str] = []
                 max_size = 0.0
                 is_bold = False
@@ -240,6 +268,8 @@ def _extract_pdf(doc: Document, path: Path) -> tuple[list[tuple[int, str, str, s
 
                 first_line = lines[0].strip()
                 full_block = "\n".join(lines).strip()
+                if furniture and _furniture_key(" ".join(lines)) in furniture:
+                    continue
 
                 # Running header/footer / page number filtering
                 bbox = b.get("bbox", (0, 0, 0, 0))
@@ -772,6 +802,12 @@ def process_document(document_id: str) -> None:
                 )
             if removed:
                 notes.append(f"{removed} instruction-like passage(s) removed.")
+            # Section rules are written before the document turns active, so there is
+            # no moment where a restricted section is searchable by everyone.
+            create_or_update_job(db, doc, status="processing", stage="section_access")
+            assigned = section_access.auto_assign(db, doc)
+            if assigned.get("applied"):
+                notes.append(f"{assigned['restricted']} of {assigned['sections']} sections assigned to specific roles.")
             doc.note = " ".join(notes)
             doc.status = "active"
             db.commit()
@@ -805,12 +841,7 @@ def reprocess_document(document_id: str) -> None:
         doc = db.get(Document, document_id)
         if not doc:
             return
-        db.query(Record).filter(Record.document_id == doc.id).delete()
-        chunk_ids = [c for (c,) in db.query(Chunk.id).filter(Chunk.document_id == doc.id).all()]
-        if chunk_ids:
-            from app.models import ChunkAccess
-            db.query(ChunkAccess).filter(ChunkAccess.chunk_id.in_(chunk_ids)).delete(synchronize_session=False)
-        db.query(Chunk).filter(Chunk.document_id == doc.id).delete()
+        row_security.purge_document_chunks(db, doc.id)
         doc.status = "processing"
         doc.version = (doc.version or 1) + 1
         db.commit()

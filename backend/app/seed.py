@@ -51,6 +51,8 @@ ACME_DOCS = [
     ("visitor_policy_notice.png", "Visitor Policy Notice (photo)", 1, ["*"]),
     ("roadmap_whiteboard.png", "Engineering Roadmap Whiteboard (photo)", 2, ["engineering", "executive"]),
     ("expense_claims_2025.csv", "Expense Claims 2025", 1, ["*"]),
+    # Shared with everyone, but its sections are assigned to roles at upload.
+    ("company_handbook_2026.pdf", "Company Handbook 2026", 1, ["*"]),
 ]
 
 # Row-level rules for structured records: each row is visible to its own

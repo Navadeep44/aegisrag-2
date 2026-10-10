@@ -20,6 +20,7 @@ import {
   Database,
   Heading,
   Check,
+  Sparkles,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Button } from "../components/ui/Button";
@@ -78,6 +79,11 @@ export default function Documents() {
   // Extracted PDF Headings & Database Records state
   const [sections, setSections] = useState<SectionMeta[]>([]);
   const [sectionsLoading, setSectionsLoading] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  // Roles that administer the system never receive sections by role (matches the backend).
+  const sectionRoles = roles.filter(
+    (r) => !["admin", "iam_admin", "document_manager", "security_auditor", "platform_super_admin", "employee"].includes(r.name),
+  );
   const [savingSectionId, setSavingSectionId] = useState<string | null>(null);
 
   // Preview state inside drawer
@@ -244,17 +250,18 @@ export default function Documents() {
     }
   }, [selectedDoc, docDrawerTab]);
 
-  async function handleToggleRoleForSection(sectionId: string, roleSlug: string) {
+  // Section roles are stored by role name; older entries may hold the slug, so both are matched.
+  async function handleToggleRoleForSection(sectionId: string, role: Role) {
     if (!selectedDoc) return;
     const target = sections.find((s) => s.section_id === sectionId);
     if (!target) return;
+    const keys = [role.name, role.slug].filter(Boolean) as string[];
     const currentRoles = target.allowed_roles || [];
-    const updatedRoles = currentRoles.includes(roleSlug)
-      ? currentRoles.filter((r) => r !== roleSlug)
-      : [...currentRoles, roleSlug];
+    const has = currentRoles.some((r) => keys.includes(r));
+    const updatedRoles = has ? currentRoles.filter((r) => !keys.includes(r)) : [...currentRoles, role.name];
 
     setSections((prev) =>
-      prev.map((s) => (s.section_id === sectionId ? { ...s, allowed_roles: updatedRoles } : s))
+      prev.map((s) => (s.section_id === sectionId ? { ...s, allowed_roles: updatedRoles, auto_assigned: false } : s))
     );
     setSavingSectionId(sectionId);
 
@@ -269,6 +276,23 @@ export default function Documents() {
       showToast((err as Error).message, "error");
     } finally {
       setSavingSectionId(null);
+    }
+  }
+
+  async function rerunAutoSections() {
+    if (!selectedDoc) return;
+    setAutoBusy(true);
+    try {
+      const res = await api<{ restricted: number; sections: number; sections_metadata: SectionMeta[] }>(
+        `/documents/${selectedDoc.id}/sections/auto-assign`, { method: "POST" });
+      showToast(`${res.restricted} of ${res.sections} sections assigned to specific roles.`, "success");
+      const fresh = await api<{ sections: SectionMeta[] }>(`/documents/${selectedDoc.id}/sections`);
+      setSections(fresh.sections);
+      load();
+    } catch (err) {
+      showToast((err as Error).message, "error");
+    } finally {
+      setAutoBusy(false);
     }
   }
 
@@ -793,8 +817,16 @@ export default function Documents() {
                         <Heading className="h-4 w-4 text-accent" />
                         <h4 className="font-semibold text-ink text-sm">Document Sections</h4>
                       </div>
-                      <span className="text-xs text-muted">Click role to restrict access</span>
+                      {(canManageGrants || isDocManager) && (
+                        <Button kind="secondary" size="sm" onClick={rerunAutoSections} disabled={autoBusy}>
+                          <Sparkles className="h-3.5 w-3.5" /> {autoBusy ? "Assigning…" : "Auto-assign by role"}
+                        </Button>
+                      )}
                     </div>
+                    <p className="-mt-2 text-xs text-muted">
+                      Each section goes only to the roles that need it. Sections marked “Everyone with document access” are general.
+                      Click a role to add or remove it.
+                    </p>
 
                     {sectionsLoading ? (
                       <div className="flex items-center justify-center p-8 text-xs text-muted gap-2">
@@ -820,6 +852,12 @@ export default function Documents() {
                                     §
                                   </span>
                                   <h5 className="font-semibold text-ink text-sm truncate">{sec.heading}</h5>
+                                  {sec.auto_assigned && (
+                                    <span title="Assigned automatically from the section's content"
+                                      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-ai/30 bg-ai-light px-1.5 py-0.5 text-[10px] font-bold text-ai">
+                                      <Sparkles className="h-3 w-3" /> Auto
+                                    </span>
+                                  )}
                                 </div>
                                 {sec.preview && (
                                   <p className="mt-1 text-xs text-muted line-clamp-2 italic">
@@ -835,22 +873,23 @@ export default function Documents() {
                             {/* Role Permission Toggles */}
                             <div className="pt-2 border-t border-line/60">
                               <div className="flex items-center justify-between text-xs mb-2">
-                                <span className="font-medium text-muted">Authorized Roles:</span>
-                                <span className="text-[0.65rem] text-muted font-mono">
-                                  {sec.allowed_roles && sec.allowed_roles.length > 0
-                                    ? `${sec.allowed_roles.length} restricted`
-                                    : "All roles allowed"}
-                                </span>
+                                <span className="font-medium text-muted">Who can read this section</span>
+                                {sec.allowed_roles && sec.allowed_roles.length > 0 ? (
+                                  <span className="rounded-full bg-accent-light px-2 py-0.5 text-[0.68rem] font-semibold text-accent">
+                                    {sec.allowed_roles.length} role{sec.allowed_roles.length > 1 ? "s" : ""} only
+                                  </span>
+                                ) : (
+                                  <span className="rounded-full bg-surface-subtle px-2 py-0.5 text-[0.68rem] font-semibold text-muted">
+                                    Everyone with document access
+                                  </span>
+                                )}
                               </div>
 
                               <div className="flex flex-wrap gap-1.5">
-                                {roles.map((r) => {
-                                  const roleSlug = r.slug || r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-                                  const isAllowed =
-                                    !sec.allowed_roles ||
-                                    sec.allowed_roles.length === 0 ||
-                                    sec.allowed_roles.includes(roleSlug) ||
-                                    sec.allowed_roles.includes(r.name);
+                                {sectionRoles.map((r) => {
+                                  // Ticked only when the section is explicitly assigned to this role.
+                                  const isAllowed = Boolean(
+                                    sec.allowed_roles?.includes(r.name) || (r.slug && sec.allowed_roles?.includes(r.slug)));
                                   const isSaving = savingSectionId === (sec.section_id || sec.id || String(idx));
 
                                   return (
@@ -858,7 +897,7 @@ export default function Documents() {
                                       key={r.id}
                                       type="button"
                                       disabled={isSaving}
-                                      onClick={() => handleToggleRoleForSection(sec.section_id || sec.id || String(idx), roleSlug)}
+                                      onClick={() => handleToggleRoleForSection(sec.section_id || sec.id || String(idx), r)}
                                       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
                                         isAllowed
                                           ? "bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100"

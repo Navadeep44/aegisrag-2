@@ -313,6 +313,9 @@ class Chunk(Base):
     """Chunks carry no access list by default. Permissions come from parent doc & section."""
 
     __tablename__ = "chunks"
+    # Never reuse a deleted chunk's id on SQLite (new databases), so no stale
+    # rule can ever point at a different chunk.
+    __table_args__ = {"sqlite_autoincrement": True}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
     document_id: Mapped[str] = mapped_column(

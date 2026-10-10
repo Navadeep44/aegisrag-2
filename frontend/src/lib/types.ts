@@ -65,6 +65,7 @@ export type SectionMeta = {
   snippet?: string;
   preview?: string;
   allowed_roles?: string[];
+  auto_assigned?: boolean;
 };
 
 export type Doc = {

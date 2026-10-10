@@ -190,6 +190,56 @@ def expense_claims(path: Path) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+HANDBOOK = [
+    ("1. Company Overview", [
+        "Acme Corp builds logistics software for mid-sized retailers and has 420 employees across three offices.",
+        "Our values are clarity, ownership and care for customers.",
+    ]),
+    ("2. Quarterly Budget Allocation", [
+        "The Q3 2026 operating budget is $6.8 million.",
+        "Engineering receives $2.9 million, Sales $1.6 million, Operations $1.3 million and Finance $0.4 million.",
+        "Any spend above $50,000 needs approval from the finance controller before a purchase order is raised.",
+    ]),
+    ("3. Compensation Review Process", [
+        "Annual salary reviews run every March. The merit increase pool is 4.5% of payroll.",
+        "Managers submit recommendations by 15 February; HR business partners calibrate them by grade.",
+        "Promotions carry a minimum 8% salary increase.",
+    ]),
+    ("4. Production Incident Runbook", [
+        "Priority-1 incidents page the on-call engineer through PagerDuty within 5 minutes.",
+        "Roll back the last deployment with: deployctl rollback --service api --to previous.",
+        "A post-incident review is written within 48 hours of resolution.",
+    ]),
+    ("5. Office and Facilities", [
+        "Offices are open 08:00 to 19:00 on weekdays. The London office is on the 4th floor of 12 Baker Street.",
+        "Book meeting rooms through the facilities portal; desks are first come, first served.",
+    ]),
+]
+
+
+def handbook(path: Path) -> None:
+    """One document shared with everyone whose sections concern different teams."""
+    pdf = pymupdf.open()
+    toc = []
+    page = pdf.new_page(width=PAGE.width, height=PAGE.height)
+    page.insert_text((56, 70), "Acme Corp Company Handbook 2026", fontsize=20, fontname="hebo")
+    y = 110
+    for heading, paragraphs in HANDBOOK:
+        if y > PAGE.height - 200:
+            page = pdf.new_page(width=PAGE.width, height=PAGE.height)
+            y = 70
+        page.insert_text((56, y), heading, fontsize=14, fontname="hebo")
+        toc.append([1, heading, pdf.page_count])
+        y += 22
+        for para in paragraphs:
+            rect = pymupdf.Rect(56, y, PAGE.width - 56, y + 60)
+            page.insert_textbox(rect, para, fontsize=11)
+            y += 34
+        y += 18
+    pdf.set_toc(toc)
+    pdf.save(path)
+
+
 def generate(folder: Path) -> dict[str, Path]:
     folder.mkdir(parents=True, exist_ok=True)
     makers = {
@@ -198,7 +248,7 @@ def generate(folder: Path) -> dict[str, Path]:
         "scanned_invoice.pdf": scanned_invoice, "salary_bands_2026.xlsx": salary_bands,
         "globex_price_list.pdf": globex_prices,
         "visitor_policy_notice.png": visitor_notice, "roadmap_whiteboard.png": roadmap_whiteboard,
-        "expense_claims_2025.csv": expense_claims,
+        "expense_claims_2025.csv": expense_claims, "company_handbook_2026.pdf": handbook,
     }
     for name, make in makers.items():
         make(folder / name)

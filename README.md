@@ -58,6 +58,7 @@ its own database.
 
 Shared docs: Leave Policy, IT Onboarding Notes, Visitor Policy Notice (photo), Expense Claims 2025 (CSV).
 Expense Claims has a **row rule**: each row is visible only to its own department; finance and executives see all rows.
+Company Handbook 2026 is shared with everyone, but its **sections are assigned to roles at upload**: the budget section goes to finance (plus leadership), the compensation process to HR, the incident runbook to engineering; the overview and office sections stay open to all.
 `user@globex.test` belongs to a second organization and sees none of the above.
 
 ## Five-minute demo
@@ -76,13 +77,14 @@ Expense Claims has a **row rule**: each row is visible only to its own departmen
 ## How it works
 
 1. **Identity** comes only from the signed token (roles, clearance, department). Request-body fields are ignored.
-2. **Authorization in SQL.** `readable_chunk_clause()` = document rule (tenant, active, grant, clearance) **AND** row/section rule (`chunk_access`). It is part of every retrieval, analytics and citation query, so restricted chunks are never loaded, ranked or sent to the model. Admins get no implicit content access.
-3. **Hybrid retrieval** over authorized chunks: Gemini embeddings (768-d, task-typed) plus BM25, fused with reciprocal rank fusion. On Postgres: pgvector plus tsvector.
-4. **Structured records** (CSV/JSON/XLSX) are stored one row per chunk plus a `records` row. Counts, sums, averages, min/max and group-bys are computed exactly over the rows the user may read. A deterministic planner runs first; the model is consulted only with a schema constrained to real tables and columns.
-5. **Grounded generation**: Gemini returns schema-constrained JSON (a direct answer plus atomic points, each citing evidence ids). Evidence is wrapped as untrusted data.
-6. **Claim verification**: each point is checked against the exact chunk it cites (every number must appear; enough content words must match). Unsupported claims are removed; the best supporting sentence is returned and highlighted on the page.
-7. **Multi-modal ingestion**: PDF text, headings and tables (PyMuPDF), charts and diagrams (Gemini vision), scanned pages and photos (Gemini vision, falling back to offline RapidOCR), XLSX/CSV/JSON rows, DOCX.
-8. **Audit**: ids and decisions only. Old answers are re-checked against current document *and* row access before they are shown again.
+2. **Automatic section access.** When a document is shared with everyone or a department, each section is classified at upload (Gemini, constrained to the workspace's real roles; keyword fallback offline). Function-specific sections are restricted to the matching roles; general sections stay open. Admins can override per section or re-run it.
+3. **Authorization in SQL.** `readable_chunk_clause()` = document rule (tenant, active, grant, clearance) **AND** row/section rule (`chunk_access`). It is part of every retrieval, analytics and citation query, so restricted chunks are never loaded, ranked or sent to the model. Admins get no implicit content access.
+4. **Hybrid retrieval** over authorized chunks: Gemini embeddings (768-d, task-typed) plus BM25, fused with reciprocal rank fusion. On Postgres: pgvector plus tsvector.
+5. **Structured records** (CSV/JSON/XLSX) are stored one row per chunk plus a `records` row. Counts, sums, averages, min/max and group-bys are computed exactly over the rows the user may read. A deterministic planner runs first; the model is consulted only with a schema constrained to real tables and columns.
+6. **Grounded generation**: Gemini returns schema-constrained JSON (a direct answer plus atomic points, each citing evidence ids). Evidence is wrapped as untrusted data.
+7. **Claim verification**: each point is checked against the exact chunk it cites (every number must appear; enough content words must match). Unsupported claims are removed; the best supporting sentence is returned and highlighted on the page.
+8. **Multi-modal ingestion**: PDF text, headings and tables (PyMuPDF), charts and diagrams (Gemini vision), scanned pages and photos (Gemini vision, falling back to offline RapidOCR), XLSX/CSV/JSON rows, DOCX.
+9. **Audit**: ids and decisions only. Old answers are re-checked against current document *and* row access before they are shown again.
 
 ## Using Gemini
 

@@ -75,3 +75,26 @@ def restricted_chunk_count(db: Session, document_id: str) -> int:
         .join(Chunk, Chunk.id == ChunkAccess.chunk_id)
         .where(Chunk.document_id == document_id)
     ).scalar_one()
+
+
+def purge_document_chunks(db: Session, document_id: str) -> None:
+    """Delete a document's chunks together with their records and access rules.
+
+    SQLite does not enforce ON DELETE CASCADE by default and may reuse a freed
+    chunk id, so leftover chunk_access rows would silently attach to the next
+    upload's chunks. Always remove all three together.
+    """
+    chunk_ids = list(db.execute(select(Chunk.id).where(Chunk.document_id == document_id)).scalars())
+    db.execute(delete(Record).where(Record.document_id == document_id))
+    if chunk_ids:
+        db.execute(delete(ChunkAccess).where(ChunkAccess.chunk_id.in_(chunk_ids)))
+    db.execute(delete(Chunk).where(Chunk.document_id == document_id))
+
+
+def remove_orphans(db: Session) -> int:
+    """Startup clean-up for databases written before purge_document_chunks existed."""
+    live = select(Chunk.id)
+    n = db.execute(delete(ChunkAccess).where(ChunkAccess.chunk_id.not_in(live))).rowcount or 0
+    n += db.execute(delete(Record).where(Record.chunk_id.not_in(live))).rowcount or 0
+    db.commit()
+    return n
