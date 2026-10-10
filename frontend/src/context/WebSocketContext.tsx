@@ -59,7 +59,20 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     const token = getToken();
     if (!user || !token) {
       if (wsRef.current) {
-        wsRef.current.close();
+        const ws = wsRef.current;
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close(1000, "Logout");
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => {
+            try {
+              ws.close(1000, "Logout");
+            } catch {}
+          };
+        }
         wsRef.current = null;
       }
       setIsConnected(false);
@@ -160,7 +173,20 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       clearInterval(pingInterval);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (wsRef.current) {
-        wsRef.current.close();
+        const ws = wsRef.current;
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close(1000, "Unmounted");
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => {
+            try {
+              ws.close(1000, "Unmounted");
+            } catch {}
+          };
+        }
         wsRef.current = null;
       }
       setIsConnected(false);
