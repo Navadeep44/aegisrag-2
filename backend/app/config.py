@@ -1,3 +1,5 @@
+"""Settings, read from backend/.env (real environment variables win).
+"""
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,7 +16,7 @@ class Settings(BaseSettings):
     database_url: str = ""
     file_storage_dir: str = (ENV_FILE.parent / "data" / "files").as_posix()
 
-    jwt_secret: str = "dev-only-change-me"
+    jwt_secret: str = "dev-only-change-me-32-byte-secure-secret-key-eyes-only"
     jwt_minutes: int = 480
 
     # Demo conveniences. Turn both off outside a demo.

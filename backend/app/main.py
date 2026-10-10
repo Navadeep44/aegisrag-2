@@ -1,3 +1,6 @@
+"""Application entry point: creates tables, loads demo data on first start,
+serves the API and (when built) the frontend.
+"""
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -54,7 +57,7 @@ if static_dir.exists() and (static_dir / "index.html").exists():
     if (static_dir / "brand").exists():
         app.mount("/brand", StaticFiles(directory=str(static_dir / "brand")), name="brand")
 
-    @app.get("/{full_path:path}")
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     async def serve_spa(full_path: str):
         if full_path.startswith("api"):
             raise HTTPException(status_code=404, detail="Not Found")
