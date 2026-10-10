@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 82" role="img" aria-label="Eyes Only">
+  <defs>
+    <mask id="ink">
+      <rect width="120" height="82" fill="#fff"/>
+      <g fill="#000">
+        <circle cx="36" cy="2.6" r="1.1"/><circle cx="38.5" cy="3.4" r=".6"/><circle cx="80" cy="2.2" r=".8"/>
+        <circle cx="96" cy="3" r=".5"/><circle cx="2.4" cy="30" r=".9"/><circle cx="3.2" cy="33" r=".5"/>
+        <circle cx="2.6" cy="58" r="1"/><circle cx="117.4" cy="24" r=".7"/><circle cx="118" cy="51" r="1"/>
+        <circle cx="117" cy="54" r=".5"/><circle cx="12" cy="79.4" r=".9"/><circle cx="62" cy="80" r=".7"/>
+        <circle cx="64.5" cy="79.2" r=".5"/><circle cx="88" cy="79.6" r="1"/><circle cx="108" cy="78.8" r=".6"/>
+      </g>
+    </mask>
+  </defs>
+  <rect x="2.4" y="2.4" width="115.2" height="77.2" rx="11.5" fill="none" stroke="#0F766E" stroke-width="4.6" mask="url(#ink)"/>
+  <g fill="none" stroke="#0F766E" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 41.4 C 30 12, 89 12, 109.6 41.4"/>
+    <path d="M10 41.4 C 24 55, 38 66, 52.6 64.4 A 21.5 21.5 0 1 1 65.6 64.4 C 80 66, 95 55, 109.6 41.4"/>
+  </g>
+  <circle cx="59.1" cy="38.2" r="6.3" fill="#B4532A"/>
+  <path d="M56.6 41.5 H61.6 L65 54.6 H53.2 Z" fill="#B4532A"/>
+</svg>

@@ -16,13 +16,20 @@ function headers(body?: BodyInit | null): Record<string, string> {
   return out;
 }
 
-export const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const rawBase = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
+export const API_BASE = rawBase.replace(/\/+api$/, "");
+
+function buildApiUrl(path: string): string {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const clean = normalized.replace(/^\/+api\//, "/");
+  return `${API_BASE}/api${clean}`;
+}
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const url = buildApiUrl(path);
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/api${normalizedPath}`, { ...init, headers: headers(init.body) });
+    response = await fetch(url, { ...init, headers: headers(init.body) });
   } catch {
     throw new Error("Cannot reach the server. Check that the backend is running on port 8000.");
   }
@@ -30,17 +37,30 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     setToken("");
     window.dispatchEvent(new Event("aegis-signed-out"));
   }
+  const rawText = await response.text();
+  const trimmed = rawText.trim();
+  if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
+    throw new Error(
+      "The server returned an HTML page instead of API JSON. If your frontend is hosted separately from your backend, set VITE_API_BASE_URL to your backend URL, or configure an /api/* rewrite."
+    );
+  }
+
   if (!response.ok) {
     let message = response.status >= 500
       ? "The server could not handle the request. Check that the backend is running on port 8000."
       : `Request failed (${response.status}).`;
     try {
-      const body = await response.json();
+      const body = JSON.parse(rawText);
       if (typeof body.detail === "string") message = body.detail;
     } catch { /* keep the default message */ }
     throw new Error(message);
   }
-  return response.json();
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    throw new Error("Invalid response format from server.");
+  }
 }
 
 export const post = <T,>(path: string, body: unknown) =>
@@ -56,18 +76,18 @@ export const del = <T,>(path: string) =>
   api<T>(path, { method: "DELETE" });
 
 export async function downloadFile(path: string, filename: string): Promise<void> {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const response = await fetch(`${API_BASE}/api${normalizedPath}`, { headers: headers() });
+  const targetUrl = buildApiUrl(path);
+  const response = await fetch(targetUrl, { headers: headers() });
   if (!response.ok) throw new Error("Download failed.");
   const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
+  const blobUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
+  a.href = blobUrl;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  URL.revokeObjectURL(blobUrl);
 }
 
 /** Page images need the auth header, so they are fetched and shown as object URLs. */

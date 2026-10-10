@@ -1,3 +1,6 @@
+"""Application entry point: creates tables, loads demo data on first start,
+serves the API and (when built) the frontend.
+"""
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -37,25 +40,29 @@ app.add_middleware(
 )
 
 app.include_router(router)
+# Handle potential double-prefix from rewrites or VITE_API_BASE_URL ending with /api
+app.include_router(router, prefix="/api")
 
 # Mount frontend build if available for single-service deployments
-frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-if not frontend_dist.exists():
-    frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+static_dir = Path(__file__).resolve().parent.parent / "static"
+if not (static_dir.exists() and (static_dir / "index.html").exists()):
+    static_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if not (static_dir.exists() and (static_dir / "index.html").exists()):
+    static_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
-if frontend_dist.exists() and (frontend_dist / "index.html").exists():
-    if (frontend_dist / "assets").exists():
-        app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
+if static_dir.exists() and (static_dir / "index.html").exists():
+    if (static_dir / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="assets")
 
-    if (frontend_dist / "brand").exists():
-        app.mount("/brand", StaticFiles(directory=str(frontend_dist / "brand")), name="brand")
+    if (static_dir / "brand").exists():
+        app.mount("/brand", StaticFiles(directory=str(static_dir / "brand")), name="brand")
 
-    @app.get("/{full_path:path}")
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     async def serve_spa(full_path: str):
         if full_path.startswith("api"):
             raise HTTPException(status_code=404, detail="Not Found")
-        file_path = frontend_dist / full_path
+        file_path = static_dir / full_path
         if file_path.is_file():
             return FileResponse(file_path)
-        return FileResponse(frontend_dist / "index.html")
+        return FileResponse(static_dir / "index.html")
 
