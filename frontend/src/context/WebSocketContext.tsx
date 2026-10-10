@@ -73,8 +73,16 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       const t = getToken();
       if (!t) return;
 
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = window.location.host;
+      let protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      let host = window.location.host;
+      const apiBase = import.meta.env.VITE_API_BASE_URL;
+      if (apiBase) {
+        try {
+          const u = new URL(apiBase);
+          protocol = u.protocol === "https:" ? "wss:" : "ws:";
+          host = u.host;
+        } catch { /* use window.location */ }
+      }
       const wsUrl = `${protocol}//${host}/api/ws?token=${encodeURIComponent(t)}`;
 
       try {

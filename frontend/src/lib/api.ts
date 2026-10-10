@@ -16,10 +16,13 @@ function headers(body?: BodyInit | null): Record<string, string> {
   return out;
 }
 
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   let response: Response;
   try {
-    response = await fetch("/api" + path, { ...init, headers: headers(init.body) });
+    response = await fetch(`${API_BASE}/api${normalizedPath}`, { ...init, headers: headers(init.body) });
   } catch {
     throw new Error("Cannot reach the server. Check that the backend is running on port 8000.");
   }
@@ -53,7 +56,8 @@ export const del = <T,>(path: string) =>
   api<T>(path, { method: "DELETE" });
 
 export async function downloadFile(path: string, filename: string): Promise<void> {
-  const response = await fetch("/api" + path, { headers: headers() });
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const response = await fetch(`${API_BASE}/api${normalizedPath}`, { headers: headers() });
   if (!response.ok) throw new Error("Download failed.");
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
@@ -69,7 +73,8 @@ export async function downloadFile(path: string, filename: string): Promise<void
 /** Page images need the auth header, so they are fetched and shown as object URLs. */
 export async function imageUrl(path: string): Promise<string | null> {
   try {
-    const response = await fetch("/api" + path, { headers: headers() });
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    const response = await fetch(`${API_BASE}/api${normalizedPath}`, { headers: headers() });
     return response.ok ? URL.createObjectURL(await response.blob()) : null;
   } catch {
     return null;
