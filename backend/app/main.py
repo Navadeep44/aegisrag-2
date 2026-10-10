@@ -37,6 +37,8 @@ app.add_middleware(
 )
 
 app.include_router(router)
+# Handle potential double-prefix from rewrites or VITE_API_BASE_URL ending with /api
+app.include_router(router, prefix="/api")
 
 # Mount frontend build if available for single-service deployments
 static_dir = Path(__file__).resolve().parent.parent / "static"
