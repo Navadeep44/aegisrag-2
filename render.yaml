@@ -1,0 +1,32 @@
+services:
+  # AegisRAG Backend Web Service
+  - type: web
+    name: aegisrag-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: DEMO_MODE
+        value: "true"
+      - key: SEED_ON_START
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+
+  # AegisRAG Frontend Static Site
+  - type: web
+    name: aegisrag-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://aegisrag-backend.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
