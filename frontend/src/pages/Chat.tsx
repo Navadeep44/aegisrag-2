@@ -2,9 +2,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  ArrowUp, Calculator, Check, ChevronDown, Database, FileText, Fingerprint, History, Image as ImageIcon, KeyRound, Lock, Plus, ScanLine, Search,
-  ShieldCheck, SlidersHorizontal, Sparkles, X, type LucideIcon,
+  ArrowUp, Calculator, Check, ChevronDown, Database, FileText, Fingerprint, History, Image as ImageIcon, KeyRound, Lock, Mic, Plus, ScanLine, Search,
+  ShieldCheck, SlidersHorizontal, Sparkles, Square, X, type LucideIcon,
 } from "lucide-react";
+import { useVoiceInput } from "../hooks/useVoiceInput";
 import { LogoMark } from "../components/brand/Logo";
 import { Notice } from "../components/ui/Notice";
 import { Button } from "../components/ui/Button";
@@ -280,6 +281,35 @@ export default function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Voice Input (Speech-to-Text) Hook
+  const {
+    isListening,
+    isSupported,
+    interimTranscript,
+    volume,
+    startListening,
+    stopListening,
+  } = useVoiceInput({
+    onTextChange: (newText) => {
+      setQuestion(newText);
+      if (inputRef.current) {
+        inputRef.current.style.height = "auto";
+        inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 128)}px`;
+      }
+    },
+    onError: (errMsg) => {
+      showToast(errMsg, "error");
+    },
+  });
+
+  // Auto-resize textarea as text changes
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 128)}px`;
+    }
+  }, [question]);
+
   // Document Selection Scope State
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [showDocPicker, setShowDocPicker] = useState(false);
@@ -376,6 +406,7 @@ export default function Chat() {
   };
 
   async function ask(text: string) {
+    if (isListening) stopListening();
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     setLastUserQuestion(trimmed);
@@ -765,14 +796,115 @@ export default function Chat() {
               )}
             </AnimatePresence>
 
+            {/* Live Voice Input Banner */}
+            <AnimatePresence>
+              {isListening && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                  className="mb-2 flex items-center justify-between gap-3 rounded-2xl border border-accent/40 bg-accent-light/80 p-2.5 px-4 backdrop-blur-md shadow-sm"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="relative flex h-3 w-3 shrink-0">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500"></span>
+                    </span>
+
+                    {/* Equalizer soundwave bars */}
+                    <div className="flex items-center gap-0.5 h-4 shrink-0">
+                      {[0.5, 0.9, 1.0, 0.6, 0.8, 0.4, 0.7].map((factor, i) => (
+                        <motion.span
+                          key={i}
+                          className="w-1 rounded-full bg-accent"
+                          animate={{
+                            height: Math.max(4, Math.min(20, (volume * 40 + 4) * factor)),
+                          }}
+                          transition={{ type: "spring", stiffness: 350, damping: 20 }}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="flex flex-col min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-accent tracking-wide uppercase">
+                          Listening...
+                        </span>
+                        <span className="text-[11px] text-muted">
+                          Speak naturally
+                        </span>
+                      </div>
+                      {interimTranscript && (
+                        <span className="truncate text-xs italic text-ink font-sans">
+                          "{interimTranscript}"
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={stopListening}
+                      className="rounded-lg px-2.5 py-1 text-xs font-semibold text-muted hover:text-ink hover:bg-surface transition-colors"
+                    >
+                      Done
+                    </button>
+                    {question.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          stopListening();
+                          ask(question);
+                        }}
+                        className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-white shadow-xs hover:bg-accent-hover transition-colors"
+                      >
+                        Send
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Composer */}
-            <form onSubmit={(e) => { e.preventDefault(); ask(question); }}
+            <form onSubmit={(e) => { e.preventDefault(); if (isListening) stopListening(); ask(question); }}
               className="glass flex items-end gap-2 rounded-2xl p-2 focus-within:border-accent/50 focus-within:shadow-[0_0_0_4px_rgba(34,211,238,0.08)]">
               <textarea ref={inputRef} rows={1} value={question} maxLength={2000} aria-label="Your question"
                 onChange={(e) => setQuestion(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(question); } }}
-                placeholder={selectedDocIds.length > 0 ? `Ask about the ${selectedDocIds.length} selected document(s)…` : "Ask about policies, scans, photos or records…"}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (isListening) stopListening(); ask(question); } }}
+                placeholder={isListening ? "Listening... speak now..." : (selectedDocIds.length > 0 ? `Ask about the ${selectedDocIds.length} selected document(s)…` : "Ask about policies, scans, photos or records…")}
                 className="max-h-32 min-h-[44px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm text-ink placeholder:text-muted-light focus:outline-none" />
+
+              {/* Voice Input Microphone Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (isListening) {
+                    stopListening();
+                  } else {
+                    startListening(question);
+                  }
+                }}
+                disabled={busy}
+                aria-label={isListening ? "Stop listening" : "Voice input (Speech to Text)"}
+                title={isListening ? "Stop voice input" : isSupported ? "Voice input (Speech to Text)" : "Voice input not supported in this browser"}
+                className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-xl transition-all ${
+                  isListening
+                    ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]"
+                    : "text-muted hover:text-accent hover:bg-accent/10 active:scale-95"
+                } disabled:opacity-30`}
+              >
+                {isListening ? (
+                  <>
+                    <span className="absolute inset-0 rounded-xl bg-red-400 animate-ping opacity-40 pointer-events-none" />
+                    <Square className="h-4 w-4 relative z-10" fill="currentColor" />
+                  </>
+                ) : (
+                  <Mic className="h-5 w-5" />
+                )}
+              </button>
+
               <button type="submit" disabled={busy || !question.trim()} aria-label="Send question"
                 className="btn-primary grid h-11 w-11 shrink-0 place-items-center rounded-xl disabled:opacity-30">
                 <ArrowUp className="h-5 w-5" />
